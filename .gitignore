@@ -10,6 +10,7 @@ htmlcov/
 venv/
 *.pyc
 *.pyo
+*.egg-info/
 AGENTS.md
 CLAUDE.md
 smart-llm.pdf

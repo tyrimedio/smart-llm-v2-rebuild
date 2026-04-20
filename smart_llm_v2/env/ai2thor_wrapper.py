@@ -6,19 +6,9 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-
-@dataclass(frozen=True, slots=True)
-class Ai2ThorConfig:
-    height: int = 1000
-    width: int = 1000
-    snap_grid: bool = False
-    grid_size: float = 0.5
-    rotate_step_degrees: int = 20
-    visibility_distance: int = 100
-    field_of_view: int = 90
-    navigation_goal_threshold: float = 0.25
-    navigation_stall_threshold: int = 8
-
+from smart_llm_v2.env.config import Ai2ThorConfig
+from smart_llm_v2.env.profiles import recommended_ai2thor_config
+from smart_llm_v2.env.state_extractor import extract_scene_objects
 
 @dataclass(frozen=True, slots=True)
 class ActionOutcome:
@@ -29,13 +19,20 @@ class ActionOutcome:
 
 class Ai2ThorEnvironment:
     def __init__(self, config: Ai2ThorConfig | None = None) -> None:
-        self.config = config or Ai2ThorConfig()
+        self.config = config or recommended_ai2thor_config()
         self._controller: Any | None = None
         self._reachable_positions: list[dict[str, float]] = []
 
     def start(self, *, floor_plan: int, agent_count: int, seed: int | None = None) -> None:
         controller_class = _load_controller_class()
-        self._controller = controller_class(height=self.config.height, width=self.config.width)
+        self._controller = controller_class(
+            height=self.config.height,
+            width=self.config.width,
+            quality=self.config.quality,
+            fullscreen=self.config.fullscreen,
+            headless=self.config.headless,
+            local_executable_path=self.config.local_executable_path,
+        )
         self._controller.reset(f"FloorPlan{floor_plan}")
         self._controller.step(
             dict(
@@ -49,8 +46,9 @@ class Ai2ThorEnvironment:
                 agentCount=agent_count,
             )
         )
-        map_view = self._controller.step(action="GetMapViewCameraProperties")
-        self._controller.step(action="AddThirdPartyCamera", **map_view.metadata["actionReturn"])
+        if self.config.add_third_party_camera:
+            map_view = self._controller.step(action="GetMapViewCameraProperties")
+            self._controller.step(action="AddThirdPartyCamera", **map_view.metadata["actionReturn"])
         self._reachable_positions = self._controller.step(
             action="GetReachablePositions"
         ).metadata["actionReturn"]
@@ -121,6 +119,10 @@ class Ai2ThorEnvironment:
             succeeded=error_message == "",
             error_message=error_message,
         )
+
+    def scene_objects(self) -> tuple[dict[str, object], ...]:
+        raw_objects = self._require_controller().last_event.metadata["objects"]
+        return extract_scene_objects(raw_objects)
 
     def agent_pose(self, *, agent_id: int) -> dict[str, float]:
         metadata = self._require_controller().last_event.events[agent_id].metadata["agent"]

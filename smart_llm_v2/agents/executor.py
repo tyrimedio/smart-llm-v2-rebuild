@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, Sequence
+from typing import Mapping, Protocol, Sequence
 
+from smart_llm_v2.agents.plan import ActionRequest, TaskPlan
 from smart_llm_v2.robots import RobotSpec
 from smart_llm_v2.skills import get_skill
 
@@ -18,13 +19,9 @@ class EnvironmentAdapter(Protocol):
         target_name: str | None = None,
     ): ...
 
+    def scene_objects(self) -> Sequence[Mapping[str, object]]: ...
 
-@dataclass(frozen=True, slots=True)
-class ActionRequest:
-    robot: str
-    skill: str
-    object_name: str | None = None
-    receptacle_name: str | None = None
+    def stop(self) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +29,16 @@ class ExecutionRecord:
     request: ActionRequest
     succeeded: bool
     error_message: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionReport:
+    plan: TaskPlan
+    records: tuple[ExecutionRecord, ...]
+    observed_objects: tuple[Mapping[str, object], ...]
+    transition_count: int
+    successful_actions: int
+    total_actions: int
 
 
 class ExecutionError(RuntimeError):
@@ -46,6 +53,35 @@ class BaselineExecutor:
 
     def execute_plan(self, steps: Sequence[ActionRequest]) -> list[ExecutionRecord]:
         return [self.execute_step(step) for step in steps]
+
+    def run_plan(self, plan: TaskPlan) -> ExecutionReport:
+        records: list[ExecutionRecord] = []
+        executed_phases = 0
+
+        # Phases preserve the paper's transition-count metric even before
+        # we introduce true concurrent execution.
+        for phase in plan.phases:
+            if not phase.actions:
+                continue
+            executed_phases += 1
+            for action in phase.actions:
+                records.append(self.execute_step(action))
+
+        successful_actions = sum(record.succeeded for record in records)
+        return ExecutionReport(
+            plan=plan,
+            records=tuple(records),
+            observed_objects=tuple(self.scene_objects()),
+            transition_count=max(executed_phases - 1, 0),
+            successful_actions=successful_actions,
+            total_actions=len(records),
+        )
+
+    def scene_objects(self) -> Sequence[Mapping[str, object]]:
+        return self.environment.scene_objects()
+
+    def close(self) -> None:
+        self.environment.stop()
 
     def execute_step(self, step: ActionRequest) -> ExecutionRecord:
         robot = self._get_robot(step.robot)

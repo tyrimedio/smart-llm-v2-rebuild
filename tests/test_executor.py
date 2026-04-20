@@ -1,6 +1,7 @@
 import pytest
 
-from smart_llm_v2.agents.executor import ActionRequest, BaselineExecutor, ExecutionError
+from smart_llm_v2.agents.executor import BaselineExecutor, ExecutionError
+from smart_llm_v2.agents.plan import ActionRequest, PlanPhase, TaskPlan
 from smart_llm_v2.env.ai2thor_wrapper import ActionOutcome
 from smart_llm_v2.robots import build_task_robot_team
 
@@ -8,6 +9,7 @@ from smart_llm_v2.robots import build_task_robot_team
 class FakeEnvironment:
     def __init__(self) -> None:
         self.calls: list[tuple[str, int, str | None, str | None]] = []
+        self.objects = ({"name": "Laptop|0", "isToggled": True},)
 
     def navigate_to_object(self, *, agent_id: int, object_name: str) -> ActionOutcome:
         self.calls.append(("navigate", agent_id, object_name, None))
@@ -22,6 +24,12 @@ class FakeEnvironment:
     ) -> ActionOutcome:
         self.calls.append(("perform", agent_id, action_name, target_name))
         return ActionOutcome(action=action_name, succeeded=True)
+
+    def scene_objects(self):
+        return self.objects
+
+    def stop(self) -> None:
+        return None
 
 
 def test_executor_dispatches_navigation() -> None:
@@ -82,3 +90,32 @@ def test_executor_rejects_missing_robot_skill() -> None:
         executor.execute_step(
             ActionRequest(robot="robot1", skill="SwitchOn", object_name="Laptop"),
         )
+
+
+def test_executor_run_plan_returns_execution_report() -> None:
+    environment = FakeEnvironment()
+    executor = BaselineExecutor(
+        environment=environment,
+        robots=build_task_robot_team((24,)),
+    )
+    plan = TaskPlan(
+        phases=(
+            PlanPhase(
+                actions=(
+                    ActionRequest(robot="robot1", skill="GoToObject", object_name="Laptop"),
+                )
+            ),
+            PlanPhase(
+                actions=(
+                    ActionRequest(robot="robot1", skill="SwitchOn", object_name="Laptop"),
+                )
+            ),
+        )
+    )
+
+    report = executor.run_plan(plan)
+
+    assert report.transition_count == 1
+    assert report.total_actions == 2
+    assert report.successful_actions == 2
+    assert report.observed_objects == environment.objects
