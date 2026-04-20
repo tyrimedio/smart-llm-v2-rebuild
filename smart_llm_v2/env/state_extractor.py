@@ -8,6 +8,7 @@ OBSERVED_OBJECT_FIELDS = (
     "objectId",
     "objectType",
     "distance",
+    "mass",
     "isBroken",
     "isCooked",
     "isOpen",
