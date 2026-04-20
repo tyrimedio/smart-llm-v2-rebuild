@@ -1,0 +1,15 @@
+.DS_Store
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.pytype/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+*.pyc
+*.pyo
+AGENTS.md
+CLAUDE.md
+smart-llm.pdf

@@ -1,0 +1,3 @@
+[submodule "SMART-LLM"]
+	path = SMART-LLM
+	url = https://github.com/SMARTlab-Purdue/SMART-LLM
