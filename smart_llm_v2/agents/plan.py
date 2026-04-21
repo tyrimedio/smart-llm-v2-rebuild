@@ -5,10 +5,14 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class ActionRequest:
-    robot: str
+    robots: tuple[str, ...]
     skill: str
     object_name: str | None = None
     receptacle_name: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.robots:
+            raise ValueError("ActionRequest requires at least one robot")
 
 
 @dataclass(frozen=True, slots=True)

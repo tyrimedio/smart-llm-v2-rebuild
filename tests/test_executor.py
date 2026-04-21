@@ -39,7 +39,7 @@ def test_executor_dispatches_navigation() -> None:
     )
 
     result = executor.execute_step(
-        ActionRequest(robot="robot1", skill="GoToObject", object_name="LightSwitch"),
+        ActionRequest(robots=("robot1",), skill="GoToObject", object_name="LightSwitch"),
     )
 
     assert result.succeeded is True
@@ -54,7 +54,7 @@ def test_executor_maps_switch_on_to_ai2thor_toggle() -> None:
     )
 
     result = executor.execute_step(
-        ActionRequest(robot="robot1", skill="SwitchOn", object_name="Laptop"),
+        ActionRequest(robots=("robot1",), skill="SwitchOn", object_name="Laptop"),
     )
 
     assert result.succeeded is True
@@ -70,7 +70,7 @@ def test_executor_uses_receptacle_for_put_object() -> None:
 
     executor.execute_step(
         ActionRequest(
-            robot="robot1",
+            robots=("robot1",),
             skill="PutObject",
             object_name="Mug",
             receptacle_name="CoffeeMachine",
@@ -88,7 +88,7 @@ def test_executor_rejects_missing_robot_skill() -> None:
 
     with pytest.raises(ExecutionError, match="does not have skill SwitchOn"):
         executor.execute_step(
-            ActionRequest(robot="robot1", skill="SwitchOn", object_name="Laptop"),
+            ActionRequest(robots=("robot1",), skill="SwitchOn", object_name="Laptop"),
         )
 
 
@@ -102,12 +102,12 @@ def test_executor_run_plan_returns_execution_report() -> None:
         phases=(
             PlanPhase(
                 actions=(
-                    ActionRequest(robot="robot1", skill="GoToObject", object_name="Laptop"),
+                    ActionRequest(robots=("robot1",), skill="GoToObject", object_name="Laptop"),
                 )
             ),
             PlanPhase(
                 actions=(
-                    ActionRequest(robot="robot1", skill="SwitchOn", object_name="Laptop"),
+                    ActionRequest(robots=("robot1",), skill="SwitchOn", object_name="Laptop"),
                 )
             ),
         )
@@ -119,3 +119,21 @@ def test_executor_run_plan_returns_execution_report() -> None:
     assert report.total_actions == 2
     assert report.successful_actions == 2
     assert report.observed_objects == environment.objects
+
+
+def test_executor_fans_out_team_actions() -> None:
+    environment = FakeEnvironment()
+    executor = BaselineExecutor(
+        environment=environment,
+        robots=build_task_robot_team((1, 2)),
+    )
+
+    result = executor.execute_step(
+        ActionRequest(robots=("robot1", "robot2"), skill="GoToObject", object_name="Laptop"),
+    )
+
+    assert result.succeeded is True
+    assert environment.calls == [
+        ("navigate", 0, "Laptop", None),
+        ("navigate", 1, "Laptop", None),
+    ]

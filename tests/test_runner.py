@@ -67,13 +67,13 @@ def test_task_plan_tracks_parallel_phase_transitions() -> None:
         phases=(
             PlanPhase(
                 actions=(
-                    ActionRequest(robot="robot1", skill="GoToObject", object_name="Laptop"),
-                    ActionRequest(robot="robot2", skill="GoToObject", object_name="LightSwitch"),
+                    ActionRequest(robots=("robot1",), skill="GoToObject", object_name="Laptop"),
+                    ActionRequest(robots=("robot2",), skill="GoToObject", object_name="LightSwitch"),
                 )
             ),
             PlanPhase(
                 actions=(
-                    ActionRequest(robot="robot1", skill="SwitchOn", object_name="Laptop"),
+                    ActionRequest(robots=("robot1",), skill="SwitchOn", object_name="Laptop"),
                 )
             ),
         )
@@ -92,8 +92,8 @@ def test_benchmark_runner_connects_planner_executor_and_metrics() -> None:
         goal_states=(GoalState(name="Laptop", state="ON"),),
     )
     plan = TaskPlan.sequential(
-        ActionRequest(robot="robot2", skill="GoToObject", object_name="Laptop"),
-        ActionRequest(robot="robot2", skill="SwitchOn", object_name="Laptop"),
+        ActionRequest(robots=("robot2",), skill="GoToObject", object_name="Laptop"),
+        ActionRequest(robots=("robot2",), skill="SwitchOn", object_name="Laptop"),
         planner_name="fake-planner",
     )
     scene_objects = ({"name": "Laptop|0", "isToggled": True},)
@@ -123,8 +123,8 @@ def test_benchmark_summary_averages_task_metrics() -> None:
         goal_states=(GoalState(name="LightSwitch", state="OFF"),),
     )
     off_plan = TaskPlan.sequential(
-        ActionRequest(robot="robot1", skill="GoToObject", object_name="LightSwitch"),
-        ActionRequest(robot="robot1", skill="SwitchOff", object_name="LightSwitch"),
+        ActionRequest(robots=("robot1",), skill="GoToObject", object_name="LightSwitch"),
+        ActionRequest(robots=("robot1",), skill="SwitchOff", object_name="LightSwitch"),
     )
     off_runner = BenchmarkRunner(
         planner=FakePlanner(off_plan),
@@ -134,7 +134,7 @@ def test_benchmark_summary_averages_task_metrics() -> None:
     )
 
     on_plan = TaskPlan.sequential(
-        ActionRequest(robot="robot1", skill="GoToObject", object_name="LightSwitch"),
+        ActionRequest(robots=("robot1",), skill="GoToObject", object_name="LightSwitch"),
     )
     on_runner = BenchmarkRunner(
         planner=FakePlanner(on_plan),

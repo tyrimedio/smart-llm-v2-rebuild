@@ -84,18 +84,18 @@ class BaselineExecutor:
         self.environment.stop()
 
     def execute_step(self, step: ActionRequest) -> ExecutionRecord:
-        robot = self._get_robot(step.robot)
-        if not robot.can(step.skill):
-            raise ExecutionError(f"{robot.name} does not have skill {step.skill}")
+        robots = self._get_robots(step.robots)
+        for robot in robots:
+            if not robot.can(step.skill):
+                raise ExecutionError(f"{robot.name} does not have skill {step.skill}")
 
-        agent_id = self._agent_ids[robot.name]
         skill = get_skill(step.skill)
 
         if step.skill == "GoToObject":
             if step.object_name is None:
                 raise ExecutionError("GoToObject requires object_name")
-            outcome = self.environment.navigate_to_object(
-                agent_id=agent_id,
+            outcome = self._navigate_team(
+                robots=robots,
                 object_name=step.object_name,
             )
             return ExecutionRecord(
@@ -105,8 +105,8 @@ class BaselineExecutor:
             )
 
         target_name = self._target_name_for_step(step)
-        outcome = self.environment.perform_action(
-            agent_id=agent_id,
+        outcome = self._perform_team_action(
+            robots=robots,
             action_name=skill.simulator_action or skill.name,
             target_name=target_name,
         )
@@ -121,6 +121,49 @@ class BaselineExecutor:
             return self._robots_by_name[name]
         except KeyError as exc:
             raise ExecutionError(f"Unknown robot {name}") from exc
+
+    def _get_robots(self, names: Sequence[str]) -> tuple[RobotSpec, ...]:
+        return tuple(self._get_robot(name) for name in names)
+
+    def _navigate_team(
+        self,
+        *,
+        robots: Sequence[RobotSpec],
+        object_name: str,
+    ):
+        outcomes = [
+            self.environment.navigate_to_object(
+                agent_id=self._agent_ids[robot.name],
+                object_name=object_name,
+            )
+            for robot in robots
+        ]
+        return self._combine_outcomes(outcomes)
+
+    def _perform_team_action(
+        self,
+        *,
+        robots: Sequence[RobotSpec],
+        action_name: str,
+        target_name: str | None,
+    ):
+        outcomes = [
+            self.environment.perform_action(
+                agent_id=self._agent_ids[robot.name],
+                action_name=action_name,
+                target_name=target_name,
+            )
+            for robot in robots
+        ]
+        return self._combine_outcomes(outcomes)
+
+    def _combine_outcomes(self, outcomes):
+        errors = [outcome.error_message for outcome in outcomes if outcome.error_message]
+        return type(outcomes[0])(
+            action=outcomes[0].action,
+            succeeded=all(outcome.succeeded for outcome in outcomes),
+            error_message="; ".join(dict.fromkeys(errors)),
+        )
 
     def _target_name_for_step(self, step: ActionRequest) -> str | None:
         if step.skill == "PutObject":
