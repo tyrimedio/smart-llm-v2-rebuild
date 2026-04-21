@@ -1,10 +1,9 @@
-"""Paper-style staged planner for the SMART-LLM control condition.
+"""Legacy paper-style staged planner for the SMART-LLM control condition.
 
 The original SMART-LLM paper used three LLM prompt stages before execution:
 task decomposition, allocation reasoning, and final code generation. We keep
-that structure here because the first benchmark milestone is reproduction, not
-redesign. A later tool-calling planner can replace these string prompts while
-still targeting the same `TaskPlan` interface.
+that structure here only as a historical ablation. The primary v2 planner path
+uses structured JSON plans instead of generated Python.
 """
 
 from __future__ import annotations
@@ -16,6 +15,7 @@ from pathlib import Path
 from typing import Mapping, Protocol, Sequence
 
 from smart_llm_v2.agents.plan import ActionRequest, PlanPhase, TaskPlan
+from smart_llm_v2.agents.planner import PlanBuildResult, PlanningImage
 from smart_llm_v2.benchmark.models import BenchmarkTask
 from smart_llm_v2.robots import RobotSpec
 from smart_llm_v2.skills import REFERENCE_PROMPT_SIGNATURES
@@ -87,19 +87,30 @@ class PaperStagedPlanner:
         self.parser = parser
         self.prompt_assets = prompt_assets or PaperPromptAssets.load()
 
+    @property
+    def uses_planning_images(self) -> bool:
+        return False
+
     def build_plan(
         self,
         *,
         task: BenchmarkTask,
         robots: Sequence[RobotSpec],
         scene_objects: Sequence[Mapping[str, object]],
-    ) -> TaskPlan:
+        planning_images: Sequence[PlanningImage] = (),
+    ) -> PlanBuildResult:
         artifacts = self.generate_artifacts(
             task=task,
             robots=robots,
             scene_objects=scene_objects,
         )
-        return self.parser.parse(task=task, robots=robots, artifacts=artifacts)
+        return PlanBuildResult(
+            plan=self.parser.parse(task=task, robots=robots, artifacts=artifacts),
+            provider="legacy",
+            model=None,
+            usage=None,
+            profile_variant="legacy",
+        )
 
     def generate_artifacts(
         self,
@@ -344,7 +355,7 @@ class _PaperAstParser:
     def parse(self) -> list[PlanPhase]:
         phases: list[PlanPhase] = []
         thread_calls: dict[str, ast.Call] = {}
-        pending_thread_actions: list[list[ActionRequest]] = []
+        active_phase_actions: list[ActionRequest] = []
 
         for statement in self.module.body:
             if isinstance(statement, ast.FunctionDef):
@@ -361,31 +372,24 @@ class _PaperAstParser:
                 thread_call = thread_calls.get(started_thread)
                 if thread_call is None:
                     raise PaperPlanParseError(f"Thread {started_thread!r} is started before assignment")
-                pending_thread_actions.append(self._actions_from_thread_call(thread_call))
+                active_phase_actions.extend(self._actions_from_thread_call(thread_call))
                 continue
 
             if self._is_thread_join(statement):
-                if pending_thread_actions:
-                    phases.append(
-                        PlanPhase(actions=tuple(action for actions in pending_thread_actions for action in actions))
-                    )
-                    pending_thread_actions.clear()
+                if active_phase_actions:
+                    phases.append(PlanPhase(actions=tuple(active_phase_actions)))
+                    active_phase_actions.clear()
                 continue
-
-            if pending_thread_actions:
-                phases.append(
-                    PlanPhase(actions=tuple(action for actions in pending_thread_actions for action in actions))
-                )
-                pending_thread_actions.clear()
 
             actions = self._actions_from_statement(statement, bindings={})
             if actions:
-                phases.append(PlanPhase(actions=tuple(actions)))
+                if active_phase_actions:
+                    active_phase_actions.extend(actions)
+                else:
+                    phases.append(PlanPhase(actions=tuple(actions)))
 
-        if pending_thread_actions:
-            phases.append(
-                PlanPhase(actions=tuple(action for actions in pending_thread_actions for action in actions))
-            )
+        if active_phase_actions:
+            phases.append(PlanPhase(actions=tuple(active_phase_actions)))
 
         return phases
 

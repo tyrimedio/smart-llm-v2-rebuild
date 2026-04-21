@@ -10,6 +10,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "ai2thor==5.0.0",
+    "anthropic>=0.96.0",
+    "openai>=1.107.1",
+    "structlog>=25.5.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -17,3 +20,6 @@ include = ["smart_llm_v2*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: provider or simulator smoke tests that should not run in fast suites",
+]

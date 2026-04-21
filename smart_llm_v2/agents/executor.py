@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Mapping, Protocol, Sequence
 
 from smart_llm_v2.agents.plan import ActionRequest, TaskPlan
+from smart_llm_v2.agents.planner import PlanningImage
 from smart_llm_v2.robots import RobotSpec
 from smart_llm_v2.skills import get_skill
 
@@ -20,6 +21,8 @@ class EnvironmentAdapter(Protocol):
     ): ...
 
     def scene_objects(self) -> Sequence[Mapping[str, object]]: ...
+
+    def planning_images(self, *, agent_ids: Sequence[int]) -> Sequence[PlanningImage]: ...
 
     def stop(self) -> None: ...
 
@@ -79,6 +82,9 @@ class BaselineExecutor:
 
     def scene_objects(self) -> Sequence[Mapping[str, object]]:
         return self.environment.scene_objects()
+
+    def planning_images(self) -> Sequence[PlanningImage]:
+        return self.environment.planning_images(agent_ids=tuple(self._agent_ids.values()))
 
     def close(self) -> None:
         self.environment.stop()
@@ -140,6 +146,19 @@ class BaselineExecutor:
         ]
         return self._combine_outcomes(outcomes)
 
+    def _perform_action(
+        self,
+        *,
+        robot: RobotSpec,
+        action_name: str,
+        target_name: str | None,
+    ):
+        return self.environment.perform_action(
+            agent_id=self._agent_ids[robot.name],
+            action_name=action_name,
+            target_name=target_name,
+        )
+
     def _perform_team_action(
         self,
         *,
@@ -148,8 +167,8 @@ class BaselineExecutor:
         target_name: str | None,
     ):
         outcomes = [
-            self.environment.perform_action(
-                agent_id=self._agent_ids[robot.name],
+            self._perform_action(
+                robot=robot,
                 action_name=action_name,
                 target_name=target_name,
             )

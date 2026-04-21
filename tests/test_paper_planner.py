@@ -90,9 +90,12 @@ def test_paper_staged_planner_builds_three_stage_requests_and_parses_result() ->
         {"objectType": "LightSwitch", "mass": 1.0},
     )
 
-    plan = planner.build_plan(task=task, robots=robots, scene_objects=scene_objects)
+    planning = planner.build_plan(task=task, robots=robots, scene_objects=scene_objects)
+    plan = planning.plan
 
     assert plan.planner_name == "fake-paper-parser"
+    assert planning.provider == "legacy"
+    assert planning.profile_variant == "legacy"
     assert [request.stage for request in planner.client.requests] == [
         "decomposition",
         "allocation_solution",
@@ -108,6 +111,14 @@ def test_paper_prompt_assets_fix_known_bad_example_signature() -> None:
 
     assert "def throw_fork_in_trash(robot_list):" in prompt_assets.allocation_code_examples
     assert "def throw_fork_in_trash():" not in prompt_assets.allocation_code_examples
+
+
+def test_agents_package_root_exports_paper_planner_symbols() -> None:
+    from smart_llm_v2.agents import AstPaperPlanParser, PaperPromptAssets, PaperStagedPlanner
+
+    assert AstPaperPlanParser is not None
+    assert PaperPromptAssets is not None
+    assert PaperStagedPlanner is not None
 
 
 def test_ast_paper_parser_builds_single_phase_for_one_subtask() -> None:
@@ -229,12 +240,45 @@ throw_fork_in_trash([robots[0], robots[2]])
     )
 
 
+def test_ast_paper_parser_keeps_main_thread_actions_concurrent_until_join() -> None:
+    parser = AstPaperPlanParser()
+    robots = build_task_robot_team((24, 25))
+    task = BenchmarkTask(
+        floor_plan=1,
+        task_index=4,
+        instruction="Pick up the mug while another robot moves to the switch",
+        robot_ids=(24, 25),
+    )
+    artifacts = PaperPlannerArtifacts(
+        decomposition="",
+        allocation_solution="# concurrent main-thread action",
+        code_solution="""
+def pick_up_mug(robot_list):
+    PickupObject(robot_list[0], 'Mug')
+
+t1 = threading.Thread(target=pick_up_mug, args=([robots[0]],))
+t1.start()
+GoToObject(robots[1], 'LightSwitch')
+t1.join()
+""",
+    )
+
+    plan = parser.parse(task=task, robots=robots, artifacts=artifacts)
+
+    assert len(plan.phases) == 1
+    assert plan.transition_count == 0
+    assert plan.phases[0].actions == (
+        ActionRequest(robots=("robot1",), skill="PickupObject", object_name="Mug"),
+        ActionRequest(robots=("robot2",), skill="GoToObject", object_name="LightSwitch"),
+    )
+
+
 def test_ast_paper_parser_rejects_malformed_function_calls() -> None:
     parser = AstPaperPlanParser()
     robots = build_task_robot_team((1, 2, 3))
     task = BenchmarkTask(
         floor_plan=1,
-        task_index=4,
+        task_index=5,
         instruction="Throw the fork in the trash",
         robot_ids=(1, 2, 3),
     )

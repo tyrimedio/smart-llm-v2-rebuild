@@ -42,17 +42,33 @@ def test_legacy_goal_condition_recall_matches_reference_behavior() -> None:
 
 def test_robot_utilization_matches_reference_formula() -> None:
     assert robot_utilization(
-        transition_count=3,
+        transition_count=2,
         transition_count_ground_truth=1,
         max_transition_count=4,
     ) == pytest.approx(2 / 3)
+
+
+def test_robot_utilization_treats_zero_transition_exact_match_as_full_use() -> None:
+    assert robot_utilization(
+        transition_count=0,
+        transition_count_ground_truth=0,
+        max_transition_count=0,
+    ) == 1.0
+
+
+def test_robot_utilization_floors_overrun_at_zero() -> None:
+    assert robot_utilization(
+        transition_count=2,
+        transition_count_ground_truth=0,
+        max_transition_count=1,
+    ) == 0.0
 
 
 def test_compute_metrics_combines_components() -> None:
     metrics = compute_metrics(
         goal_states=(GoalState(name="LightSwitch", state="OFF"),),
         observed_objects=({"name": "LightSwitch|0", "isToggled": False},),
-        transition_count=1,
+        transition_count=0,
         transition_count_ground_truth=0,
         max_transition_count=0,
         successful_actions=3,

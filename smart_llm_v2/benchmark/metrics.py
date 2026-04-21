@@ -104,21 +104,25 @@ def robot_utilization(
     transition_count_ground_truth: int,
     max_transition_count: int,
 ) -> float:
+    # The benchmark stores transition counts, but the paper's RU formula compares
+    # phase counts, so shift the observed run onto the same scale first.
+    observed_transition_count = transition_count + 1
     reference_max = max_transition_count + 1
     reference_ground_truth = transition_count_ground_truth + 1
 
     if (
         reference_max == reference_ground_truth
-        and reference_ground_truth == transition_count
+        and reference_ground_truth == observed_transition_count
     ):
         return 1.0
 
     if reference_max == reference_ground_truth:
         return 0.0
 
-    return (reference_max - transition_count) / (
+    ru = (reference_max - observed_transition_count) / (
         reference_max - reference_ground_truth
     )
+    return max(ru, 0.0)
 
 
 def executability(*, successful_actions: int, total_actions: int) -> float:

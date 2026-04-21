@@ -2,6 +2,7 @@ import pytest
 
 from smart_llm_v2.agents.executor import BaselineExecutor, ExecutionError
 from smart_llm_v2.agents.plan import ActionRequest, PlanPhase, TaskPlan
+from smart_llm_v2.agents.planner import PlanningImage
 from smart_llm_v2.env.ai2thor_wrapper import ActionOutcome
 from smart_llm_v2.robots import build_task_robot_team
 
@@ -27,6 +28,12 @@ class FakeEnvironment:
 
     def scene_objects(self):
         return self.objects
+
+    def planning_images(self, *, agent_ids):
+        return tuple(
+            PlanningImage(data=b"png", agent_id=agent_id, label=f"agent_{agent_id}_egocentric")
+            for agent_id in agent_ids
+        )
 
     def stop(self) -> None:
         return None
@@ -136,4 +143,40 @@ def test_executor_fans_out_team_actions() -> None:
     assert environment.calls == [
         ("navigate", 0, "Laptop", None),
         ("navigate", 1, "Laptop", None),
+    ]
+
+
+def test_executor_executes_team_pickup_for_each_robot() -> None:
+    environment = FakeEnvironment()
+    executor = BaselineExecutor(
+        environment=environment,
+        robots=build_task_robot_team((1, 2)),
+    )
+
+    result = executor.execute_step(
+        ActionRequest(robots=("robot1", "robot2"), skill="PickupObject", object_name="Mug"),
+    )
+
+    assert result.succeeded is True
+    assert environment.calls == [
+        ("perform", 0, "PickupObject", "Mug"),
+        ("perform", 1, "PickupObject", "Mug"),
+    ]
+
+
+def test_executor_executes_team_throw_for_each_robot() -> None:
+    environment = FakeEnvironment()
+    executor = BaselineExecutor(
+        environment=environment,
+        robots=build_task_robot_team((1, 2)),
+    )
+
+    result = executor.execute_step(
+        ActionRequest(robots=("robot1", "robot2"), skill="ThrowObject", object_name="Fork"),
+    )
+
+    assert result.succeeded is True
+    assert environment.calls == [
+        ("perform", 0, "ThrowObject", "Fork"),
+        ("perform", 1, "ThrowObject", "Fork"),
     ]

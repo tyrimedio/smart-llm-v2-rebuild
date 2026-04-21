@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import io
 import math
 import random
 import re
 from dataclasses import dataclass
 from typing import Any
 
+from smart_llm_v2.agents.planner import PlanningImage
 from smart_llm_v2.env.config import Ai2ThorConfig
 from smart_llm_v2.env.profiles import recommended_ai2thor_config
 from smart_llm_v2.env.state_extractor import extract_scene_objects
@@ -124,6 +126,31 @@ class Ai2ThorEnvironment:
         raw_objects = self._require_controller().last_event.metadata["objects"]
         return extract_scene_objects(raw_objects)
 
+    def planning_images(self, *, agent_ids: tuple[int, ...] | list[int]) -> tuple[PlanningImage, ...]:
+        try:
+            from PIL import Image
+        except ModuleNotFoundError as exc:
+            raise RuntimeError("Pillow is required to encode AI2-THOR planning images.") from exc
+
+        images: list[PlanningImage] = []
+        events = self._require_controller().last_event.events
+        for agent_id in agent_ids:
+            frame = events[agent_id].frame
+            if frame is None:
+                continue
+            image = Image.fromarray(frame)
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG")
+            images.append(
+                PlanningImage(
+                    data=buffer.getvalue(),
+                    media_type="image/png",
+                    agent_id=agent_id,
+                    label=f"agent_{agent_id}_egocentric",
+                )
+            )
+        return tuple(images)
+
     def agent_pose(self, *, agent_id: int) -> dict[str, float]:
         metadata = self._require_controller().last_event.events[agent_id].metadata["agent"]
         return {
@@ -154,7 +181,11 @@ class Ai2ThorEnvironment:
         raise ValueError(f"Object {object_name!r} not found in scene")
 
     def _resolve_nearest_object_id(self, object_name: str, *, agent_id: int) -> str:
-        objects = self._require_controller().last_event.metadata["objects"]
+        controller = self._require_controller()
+        objects = controller.last_event.events[agent_id].metadata.get(
+            "objects",
+            controller.last_event.metadata["objects"],
+        )
         matches: list[tuple[float, str]] = []
         for obj in objects:
             object_id = obj["objectId"]
