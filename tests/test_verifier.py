@@ -9,7 +9,7 @@ from smart_llm_v2.agents.verifier import (
     semantic_verification_json_schema,
     semantic_verification_result_from_mapping,
 )
-from smart_llm_v2.benchmark.models import BenchmarkTask
+from smart_llm_v2.benchmark.models import BenchmarkTask, GoalState
 from smart_llm_v2.robots import build_task_robot_team
 
 
@@ -509,6 +509,40 @@ def test_verifier_rejects_put_before_pickup_and_closed_receptacle() -> None:
     }
 
 
+def test_verifier_allows_put_into_non_openable_receptacle_with_false_open_state() -> None:
+    plan = TaskPlan(
+        phases=(
+            PlanPhase(
+                actions=(
+                    ActionRequest(robots=("robot1",), skill="PickupObject", object_name="Mug"),
+                    ActionRequest(
+                        robots=("robot1",),
+                        skill="PutObject",
+                        object_name="Mug",
+                        receptacle_name="DiningTable",
+                    ),
+                )
+            ),
+        )
+    )
+
+    result = PlanVerifier().verify(
+        task=_task(),
+        robots=build_task_robot_team((1,)),
+        scene_objects=(
+            {
+                "name": "DiningTable|0",
+                "objectType": "DiningTable",
+                "openable": False,
+                "isOpen": False,
+            },
+        ),
+        plan=plan,
+    )
+
+    assert "closed_receptacle" not in {issue.code for issue in result.issues}
+
+
 def test_verifier_skips_semantic_review_when_deterministic_checks_fail() -> None:
     semantic_client = FakeSemanticClient(SemanticVerificationResult())
     plan = TaskPlan(
@@ -587,6 +621,139 @@ def test_verifier_runs_semantic_review_after_deterministic_checks_pass() -> None
     assert result.usage == {"reasoning_tokens": 12}
     assert result.issues[0].source == "semantic"
     assert len(semantic_client.requests) == 1
+
+
+def test_verifier_filters_known_unscored_semantic_issues() -> None:
+    semantic_client = FakeSemanticClient(
+        SemanticVerificationResult(
+            issues=(
+                VerificationIssue(
+                    code="MISSING_STOP_ACTION",
+                    message="The faucet is not switched off.",
+                    source="semantic",
+                    phase_index=0,
+                    action_index=1,
+                ),
+            ),
+            provider="kimi",
+            model="kimi-k2.6",
+            usage={"total_tokens": 12},
+        )
+    )
+    plan = TaskPlan(
+        phases=(
+            PlanPhase(
+                actions=(
+                    ActionRequest(robots=("robot1",), skill="GoToObject", object_name="Faucet"),
+                    ActionRequest(robots=("robot1",), skill="SwitchOn", object_name="Faucet"),
+                )
+            ),
+        )
+    )
+    task = BenchmarkTask(
+        floor_plan=414,
+        task_index=30,
+        instruction="Throw the cloth in trash and Fill water in the BathTub",
+        robot_ids=(24,),
+    )
+
+    result = PlanVerifier(semantic_client=semantic_client).verify(
+        task=task,
+        robots=build_task_robot_team((24,)),
+        scene_objects=(),
+        plan=plan,
+    )
+
+    assert result.passed is True
+    assert result.semantic_checked is True
+    assert result.provider == "kimi"
+    assert result.usage == {"total_tokens": 12}
+
+
+def test_verifier_keeps_unscored_semantic_codes_when_target_is_scored() -> None:
+    semantic_client = FakeSemanticClient(
+        SemanticVerificationResult(
+            issues=(
+                VerificationIssue(
+                    code="MISSING_STOP_ACTION",
+                    message="The faucet is not switched off.",
+                    source="semantic",
+                    phase_index=0,
+                    action_index=1,
+                ),
+            )
+        )
+    )
+    plan = TaskPlan(
+        phases=(
+            PlanPhase(
+                actions=(
+                    ActionRequest(robots=("robot1",), skill="GoToObject", object_name="Faucet"),
+                    ActionRequest(robots=("robot1",), skill="SwitchOn", object_name="Faucet"),
+                )
+            ),
+        )
+    )
+    task = BenchmarkTask(
+        floor_plan=414,
+        task_index=30,
+        instruction="Turn on the faucet",
+        robot_ids=(24,),
+        goal_states=(GoalState(name="Faucet", state="ON"),),
+    )
+
+    result = PlanVerifier(semantic_client=semantic_client).verify(
+        task=task,
+        robots=build_task_robot_team((24,)),
+        scene_objects=(),
+        plan=plan,
+    )
+
+    assert result.passed is False
+    assert result.issues[0].code == "MISSING_STOP_ACTION"
+
+
+def test_verifier_keeps_preparation_issues_on_intermediate_targets() -> None:
+    semantic_client = FakeSemanticClient(
+        SemanticVerificationResult(
+            issues=(
+                VerificationIssue(
+                    code="MISSING_PREPARATION",
+                    message="The toaster is not prepared to cook the bread.",
+                    source="semantic",
+                    phase_index=0,
+                    action_index=1,
+                ),
+            )
+        )
+    )
+    plan = TaskPlan(
+        phases=(
+            PlanPhase(
+                actions=(
+                    ActionRequest(robots=("robot1",), skill="GoToObject", object_name="Toaster"),
+                    ActionRequest(robots=("robot1",), skill="SwitchOn", object_name="Toaster"),
+                )
+            ),
+        )
+    )
+    task = BenchmarkTask(
+        floor_plan=21,
+        task_index=21,
+        instruction="Toast a slice of the breadloaf",
+        robot_ids=(24,),
+        goal_states=(GoalState(name="Bread", state="COOKED"),),
+    )
+
+    result = PlanVerifier(semantic_client=semantic_client).verify(
+        task=task,
+        robots=build_task_robot_team((24,)),
+        scene_objects=(),
+        plan=plan,
+    )
+
+    assert result.passed is False
+    assert result.issues[0].code == "MISSING_PREPARATION"
 
 
 def test_semantic_verification_schema_requires_nullable_issue_indexes() -> None:

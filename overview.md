@@ -78,17 +78,19 @@ Repo, dataset, videos: https://sites.google.com/view/smart-llm/
 
 The canonical interface in v2 is a typed JSON plan, not generated Python. The benchmark should stay faithful to the paper's tasks and metrics, but the planner should use the best available structured-output path rather than preserve a 2023 workaround.
 
-The implemented path today is narrower than the target diagram: provider-backed planning, JSON plan validation, baseline execution, and benchmark metrics are in place. A hybrid verifier exists behind the optional runner hook, but the structured-control experiment intentionally leaves it off so its archived metrics stay raw planner plus executor metrics. The monitor/replan loop is still a planned layer, not a finished module.
+The implemented path today is narrower than the target diagram: provider-backed planning, JSON plan validation, baseline execution, benchmark metrics, and a verifier-gated experiment path are in place. The structured-control experiment intentionally leaves the verifier off so its archived metrics stay raw planner plus executor metrics. The monitor/replan loop is still a planned layer, not a finished module.
 
 ### Current implementation snapshot
 
 - `BenchmarkRunner`, `tasks.py`, and `metrics.py` already cover the paper's 36-task dataset snapshot and scoring surface.
 - `JsonPlanner` is the primary planner path. It validates structured plans into typed dataclasses (`TaskPlan`, `PlanPhase`, `ActionRequest`) instead of generated Python.
 - Provider-backed planning is wired for Claude Opus 4.7, GPT-5.4 (the ChatGPT 5.4 family), and Kimi K2.6. Claude uses Anthropic's Messages API, while GPT-5.4 and Kimi use an OpenAI-compatible chat-completions tool-calling path.
+- Kimi K2.6 requires Moonshot's OpenAI-compatible endpoint with thinking disabled for forced tool calls and temperature set to `0.6`.
 - Both symbolic and multimodal planner variants exist. The multimodal variant attaches egocentric AI2-THOR frames as planning images.
 - `BaselineExecutor` and `Ai2ThorEnvironment` run the current control path in simulation.
 - `paper_planner.py` exists as the legacy staged ablation path, but it is not the main planner and the benchmark work is still centered on the JSON-first path.
-- `verifier.py` is available as a hybrid pre-execution check: deterministic rules catch obvious conflicts first, then a provider-backed semantic verifier reviews the surviving plan through the same model profile as the planner. It is not wired into `01_structured_control.py`.
+- `verifier.py` is available as a hybrid pre-execution check: deterministic rules catch obvious conflicts first, then a provider-backed semantic verifier reviews the surviving plan through the same model profile as the planner. It is wired into `03_add_verifier.py`, not into `01_structured_control.py`.
+- `replay_task_run.py` can replay saved `task_runs.jsonl` plans without another model call, with slower simulator pacing for inspection.
 - `monitor.py` and closed-loop replanning are still roadmap items.
 
 ### Design note: benchmark fidelity vs paper inheritance
@@ -156,7 +158,7 @@ When benchmarking against the paper, do not change the task suite, goal states, 
 
 ### Key implementation decisions
 
-1. **Provider-backed reasoning planner**: Claude Opus 4.7 is the default planner profile, with GPT-5.4 (the ChatGPT 5.4 family) and Kimi K2.6 already wired as comparison models. Claude uses extended thinking through Anthropic's Messages API. GPT-5.4 and Kimi K2.6 both run through the OpenAI-compatible tool-calling path, with Kimi pointed at Moonshot's base URL.
+1. **Provider-backed reasoning planner**: Claude Opus 4.7 is the default planner profile, with GPT-5.4 (the ChatGPT 5.4 family) and Kimi K2.6 already wired as comparison models. Claude uses extended thinking through Anthropic's Messages API. GPT-5.4 and Kimi K2.6 both run through the OpenAI-compatible tool-calling path, with Kimi pointed at Moonshot's base URL. Kimi's forced-tool path disables thinking because Moonshot rejects specified `tool_choice` while thinking is enabled.
 
 2. **Structured JSON is the plan contract**: Each robot skill is represented by a typed action schema. The model returns parseable plan data directly instead of generating Python. In the current codebase, that contract is enforced with JSON-schema-like tool definitions plus typed dataclasses and explicit validation in `json_planner.py`, not with `pydantic`.
 
@@ -176,7 +178,7 @@ When benchmarking against the paper, do not change the task suite, goal states, 
 
 10. **Scheduling should become more explicit than paper-style phases**: The paper's transition metric makes phase boundaries useful for reporting, and the current typed plan preserves that. Longer term, the planner and executor should move toward the phase/sub-task/action contract above, then toward a partial-order or dependency-aware schedule that can represent real concurrency, resource contention, and reordering under failure without forcing everything into coarse sequential phases.
 
-11. **Verifier logic should be hybrid, not purely generative**: A verifier pass is a second planning check before execution. In this project, the best version is a hybrid: deterministic checks enforce skill coverage, argument validity, and obvious conflicts, while a second model pass handles semantic gaps that are awkward to encode by hand.
+11. **Verifier logic should be hybrid, not purely generative**: A verifier pass is a second planning check before execution. In this project, the best version is a hybrid: deterministic checks enforce skill coverage, argument validity, and obvious conflicts, while a second model pass handles semantic gaps that are awkward to encode by hand. For paper-benchmark runs, semantic verifier issues must stay scoped to what the benchmark can actually score; known out-of-scope policy issues such as faucet shutoff should not block a plan unless tied to a scored goal.
 12. **Verifier model selection should stay simple until we measure cross-model effects**: For the first semantic verifier pass, reuse the planner's resolved provider/model profile so benchmark runs only change one variable at a time. Add separate verifier-profile config only when we actually start cross-model verifier experiments.
 
 ### Tech stack
@@ -233,6 +235,8 @@ smart-llm-v2/
     robots.py
   experiments/
     01_structured_control.py
+    03_add_verifier.py
+    replay_task_run.py
   tests/
     ...
   results/
@@ -251,7 +255,6 @@ smart-llm-v2/
       monitor.py
   experiments/
     02_reasoning_model_swap.py
-    03_add_verifier.py
     04_closed_loop.py
     05_cross_model_variance.py
     06_legacy_prompt_ablation.py
@@ -263,11 +266,11 @@ smart-llm-v2/
 
 2. **Done: JSON plan contract**. The typed phased-plan boundary is implemented and exercised through the structured planner tests.
 
-3. **In progress: structured control run**. The provider-backed control path exists for Claude Opus 4.7, GPT-5.4, and Kimi K2.6. The next concrete step is to run and archive comparable benchmark outputs across the 36 tasks instead of stopping at unit coverage and a single experiment entrypoint.
+3. **Done for Kimi: structured control run**. The provider-backed control path exists for Claude Opus 4.7, GPT-5.4, and Kimi K2.6. Kimi symbolic seed 0 has been run and archived at `results/structured-control-kimi-symbolic-seed0/`: SR 0.4444, TCR 0.5556, GCR 0.5694, RU 0.5278, Exe 0.4804. The next control-run work is to repeat the same archived run for GPT-5.4 and Claude Opus 4.7.
 
-4. **Done: optional hybrid verifier pass**. The runner can run deterministic pre-execution checks first, then send surviving plans through a structured semantic verifier that reuses the planner's model profile. A dedicated verifier experiment still needs to archive verifier-gated benchmark outputs.
+4. **Done for Kimi, needs rerun after fixes: hybrid verifier pass**. The runner can run deterministic pre-execution checks first, then send surviving plans through a structured semantic verifier that reuses the planner's model profile. The first Kimi verifier-gated run is archived at `results/verifier-kimi-symbolic-seed0/`: SR 0.1389, TCR 0.1944, GCR 0.2083, RU 0.1667, Exe 0.1694, with 19 verification rejections. That first run exposed verifier false positives, and the follow-up fixes now handle non-openable receptacles, benchmark-scoped semantic filtering, and nested AI2-THOR object IDs. The next concrete step is to rerun `03_add_verifier.py` for Kimi symbolic seed 0 after those fixes and compare against both archived Kimi runs.
 
-5. **Next: closed-loop replanning**. Add a monitor that captures execution failures and state mismatches, then re-invokes the planner with failure context and a bounded replan budget.
+5. **Next: closed-loop replanning**. Add a monitor that captures execution failures and state mismatches, then re-invokes the planner with failure context and a bounded replan budget. Do this after the verifier-gated Kimi rerun, so replanning does not inherit stale verifier false positives.
 
 6. **Next: replace paper-era runtime assumptions**. Move from phase-only execution toward dependency-aware scheduling, and change the planner objective from "fewest robots" to "highest chance of success with good utilization and reasonable parallelism." Keep the old framing only as a benchmark ablation.
 
@@ -283,6 +286,7 @@ smart-llm-v2/
 - **Code style**: Clean, typed (mypy or pyright strict), pytest-covered, well-documented. Portfolio piece and grad-app material. Readability matters more than cleverness.
 - **Paper-matching**: Use the authors' original task descriptions and ground-truth states verbatim where available. Cite them. Frame as an extension, not a replacement. Match the benchmark, not necessarily the outdated prompt schema.
 - **Cost awareness**: Reasoning model calls at scale are expensive. Cache prompts and responses aggressively. Persist every API call so reruns do not require re-billing.
+- **Observed Kimi usage**: the first Kimi symbolic smoke run used 7,020 tokens. The archived raw 36-task run recorded 164,459 tokens across successful planner calls, with actual billed usage likely around 225k-230k after failed planner calls. The first verifier-gated Kimi run recorded 169,901 planner tokens and 69,450 verifier tokens across successful recorded calls.
 
 ## Known open questions
 
@@ -293,6 +297,8 @@ smart-llm-v2/
 5. How aggressive should we be about replacing phase-only execution with dependency-aware scheduling while still reporting RU in a way that stays comparable to the paper?
 6. What replan budget and caching policy keep benchmark cost under control now that verifier and recovery loops add extra model calls?
 7. How much of the legacy prompt path do we want to preserve as a real ablation, versus keeping it only as a parity and parser reference?
+8. Some benchmark records have empty or incomplete `goal_states`, such as `FloorPlan414:29`. Semantic verifier policy must account for what the metric layer can score, or it can reject plans for conditions the benchmark never measures.
+9. AI2-THOR exposes nested object IDs such as `Sink|...|SinkBasin`. The executor now matches exact IDs literally and nested ID components, but the next verifier run should confirm that this reduces `SinkBasin` execution failures in practice.
 
 ## References
 

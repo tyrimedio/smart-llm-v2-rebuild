@@ -3,7 +3,6 @@ from __future__ import annotations
 import io
 import math
 import random
-import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -175,7 +174,7 @@ class Ai2ThorEnvironment:
         objects = self._require_controller().last_event.metadata["objects"]
         for obj in objects:
             object_id = obj["objectId"]
-            if re.match(object_name, object_id):
+            if _matches_object_id(object_name, object_id):
                 center = obj["axisAlignedBoundingBox"]["center"]
                 if center != {"x": 0.0, "y": 0.0, "z": 0.0}:
                     return object_id, center
@@ -190,7 +189,7 @@ class Ai2ThorEnvironment:
         matches: list[tuple[float, str]] = []
         for obj in objects:
             object_id = obj["objectId"]
-            if re.match(object_name, object_id):
+            if _matches_object_id(object_name, object_id):
                 matches.append((float(obj.get("distance", math.inf)), object_id))
         if not matches:
             raise ValueError(f"Object {object_name!r} not found in scene")
@@ -268,3 +267,12 @@ def _load_controller_class() -> Any:
 
 def _distance_2d(point_a: tuple[float, float], point_b: tuple[float, float]) -> float:
     return math.dist(point_a, point_b)
+
+
+def _matches_object_id(object_name: str, object_id: str) -> bool:
+    if object_name == object_id:
+        return True
+    query = object_name.casefold()
+    if object_id.split("|", 1)[0].casefold() == query:
+        return True
+    return any(part.casefold() == query for part in object_id.split("|"))
