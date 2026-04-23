@@ -46,20 +46,30 @@ def test_json_task_plan_converts_to_task_plan() -> None:
         "phases": [
             {
                 "label": "prepare",
-                "actions": [
+                "subtasks": [
                     {
-                        "robots": ["robot1", "robot2"],
-                        "skill": "GoToObject",
-                        "object_name": "LightSwitch",
+                        "assigned_robots": ["robot1", "robot2"],
+                        "actions": [
+                            {
+                                "robots": ["robot1", "robot2"],
+                                "skill": "GoToObject",
+                                "object_name": "LightSwitch",
+                            }
+                        ],
                     }
                 ],
             },
             {
-                "actions": [
+                "subtasks": [
                     {
-                        "robots": ["robot1"],
-                        "skill": "SwitchOn",
-                        "object_name": "Laptop",
+                        "assigned_robots": ["robot1"],
+                        "actions": [
+                            {
+                                "robots": ["robot1"],
+                                "skill": "SwitchOn",
+                                "object_name": "Laptop",
+                            }
+                        ],
                     }
                 ]
             },
@@ -81,9 +91,69 @@ def test_json_task_plan_converts_to_task_plan() -> None:
     assert plan.notes == "Laptop needs the switch turned on first."
     assert plan.transition_count == 1
     assert plan.phases[0].label == "prepare"
+    assert plan.phases[0].subtasks[0].assigned_robots == ("robot1", "robot2")
     assert plan.phases[0].actions == (
         ActionRequest(robots=("robot1", "robot2"), skill="GoToObject", object_name="LightSwitch"),
     )
+
+
+def test_json_task_plan_accepts_legacy_phase_actions_during_migration() -> None:
+    payload = {
+        "phases": [
+            {
+                "actions": [
+                    {
+                        "robots": ["robot1"],
+                        "skill": "GoToObject",
+                        "object_name": "Laptop",
+                    }
+                ]
+            }
+        ]
+    }
+
+    json_plan = JsonTaskPlan.from_mapping(
+        payload,
+        valid_robot_names=frozenset({"robot1"}),
+        valid_skills=frozenset({"GoToObject"}),
+        robot_skills_by_name={"robot1": frozenset({"GoToObject"})},
+    )
+    plan = json_plan.to_task_plan(planner_name="json-test")
+
+    assert len(plan.phases[0].subtasks) == 1
+    assert plan.phases[0].subtasks[0].assigned_robots == ("robot1",)
+
+
+def test_json_task_plan_rejects_subtask_assignment_that_omits_action_robot() -> None:
+    payload = {
+        "phases": [
+            {
+                "subtasks": [
+                    {
+                        "assigned_robots": ["robot1"],
+                        "actions": [
+                            {
+                                "robots": ["robot2"],
+                                "skill": "GoToObject",
+                                "object_name": "Laptop",
+                            }
+                        ],
+                    }
+                ]
+            }
+        ]
+    }
+
+    with pytest.raises(JsonPlanValidationError, match="assigned_robots"):
+        JsonTaskPlan.from_mapping(
+            payload,
+            valid_robot_names=frozenset({"robot1", "robot2"}),
+            valid_skills=frozenset({"GoToObject"}),
+            robot_skills_by_name={
+                "robot1": frozenset({"GoToObject"}),
+                "robot2": frozenset({"GoToObject"}),
+            },
+        )
 
 
 def test_json_task_plan_rejects_unknown_robot_names() -> None:
@@ -315,6 +385,8 @@ def test_json_planner_builds_request_context_and_validates_response() -> None:
         }
     ]
     assert request.response_schema["properties"]["phases"]["type"] == "array"
+    phase_schema = request.response_schema["properties"]["phases"]["items"]
+    assert "subtasks" in phase_schema["required"]
     assert planning.provider == "anthropic"
     assert planning.model == "claude-opus-4-7"
     assert planning.usage == {"prompt_tokens": 12, "completion_tokens": 4, "total_tokens": 16}

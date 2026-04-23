@@ -128,6 +128,20 @@ def test_task_run_payload_includes_provider_model_and_usage_metadata() -> None:
     assert payload["planner_model"] == "claude-opus-4-7"
     assert payload["planner_profile_variant"] == "symbolic"
     assert payload["planner_usage"] == {"input_tokens": 10, "output_tokens": 5}
+    assert payload["plan"][0]["subtasks"] == [
+        {
+            "label": None,
+            "assigned_robots": ["robot1"],
+            "actions": [
+                {
+                    "robots": ["robot1"],
+                    "skill": "SwitchOn",
+                    "object_name": "Laptop",
+                    "receptacle_name": None,
+                }
+            ],
+        }
+    ]
     assert "verifier_provider" not in payload
     assert "verification_issues" not in payload
 

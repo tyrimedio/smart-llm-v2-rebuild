@@ -177,9 +177,10 @@ def _task_plan_tool(schema: Mapping[str, object], *, strict: bool) -> dict[str, 
     return _tool(
         tool_name=TASK_PLAN_TOOL_NAME,
         description=(
-            "Return the complete task plan as structured JSON. Use phased actions, "
-            "assign one or more robots to each action, and include only actions that "
-            "match the provided robot skills and task constraints."
+            "Return the complete task plan as structured JSON. Use phases for temporal "
+            "layers, sub-tasks for parallel work inside a phase, and ordered actions "
+            "inside each sub-task. Include only actions that match the provided robot "
+            "skills and task constraints."
         ),
         schema=schema,
         strict=strict,
@@ -189,25 +190,40 @@ def _task_plan_tool(schema: Mapping[str, object], *, strict: bool) -> dict[str, 
                 "phases": [
                     {
                         "label": "prepare",
-                        "actions": [
+                        "subtasks": [
                             {
-                                "robots": ["robot1"],
-                                "skill": "GoToObject",
-                                "object_name": "LightSwitch",
+                                "assigned_robots": ["robot1"],
+                                "actions": [
+                                    {
+                                        "robots": ["robot1"],
+                                        "skill": "GoToObject",
+                                        "object_name": "LightSwitch",
+                                    }
+                                ],
                             },
                             {
-                                "robots": ["robot2"],
-                                "skill": "GoToObject",
-                                "object_name": "Laptop",
+                                "assigned_robots": ["robot2"],
+                                "actions": [
+                                    {
+                                        "robots": ["robot2"],
+                                        "skill": "GoToObject",
+                                        "object_name": "Laptop",
+                                    }
+                                ],
                             },
                         ],
                     },
                     {
-                        "actions": [
+                        "subtasks": [
                             {
-                                "robots": ["robot2"],
-                                "skill": "SwitchOn",
-                                "object_name": "Laptop",
+                                "assigned_robots": ["robot2"],
+                                "actions": [
+                                    {
+                                        "robots": ["robot2"],
+                                        "skill": "SwitchOn",
+                                        "object_name": "Laptop",
+                                    }
+                                ],
                             }
                         ]
                     },

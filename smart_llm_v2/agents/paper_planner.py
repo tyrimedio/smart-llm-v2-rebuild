@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Protocol, Sequence
 
-from smart_llm_v2.agents.plan import ActionRequest, PlanPhase, TaskPlan
+from smart_llm_v2.agents.plan import ActionRequest, PlanPhase, PlanSubTask, TaskPlan
 from smart_llm_v2.agents.planner import PlanBuildResult, PlanningImage
 from smart_llm_v2.benchmark.models import BenchmarkTask
 from smart_llm_v2.robots import RobotSpec
@@ -355,7 +355,7 @@ class _PaperAstParser:
     def parse(self) -> list[PlanPhase]:
         phases: list[PlanPhase] = []
         thread_calls: dict[str, ast.Call] = {}
-        active_phase_actions: list[ActionRequest] = []
+        active_phase_subtasks: list[PlanSubTask] = []
 
         for statement in self.module.body:
             if isinstance(statement, ast.FunctionDef):
@@ -372,24 +372,26 @@ class _PaperAstParser:
                 thread_call = thread_calls.get(started_thread)
                 if thread_call is None:
                     raise PaperPlanParseError(f"Thread {started_thread!r} is started before assignment")
-                active_phase_actions.extend(self._actions_from_thread_call(thread_call))
+                actions = self._actions_from_thread_call(thread_call)
+                if actions:
+                    active_phase_subtasks.append(PlanSubTask(actions=tuple(actions)))
                 continue
 
             if self._is_thread_join(statement):
-                if active_phase_actions:
-                    phases.append(PlanPhase(actions=tuple(active_phase_actions)))
-                    active_phase_actions.clear()
+                if active_phase_subtasks:
+                    phases.append(PlanPhase(subtasks=tuple(active_phase_subtasks)))
+                    active_phase_subtasks.clear()
                 continue
 
             actions = self._actions_from_statement(statement, bindings={})
             if actions:
-                if active_phase_actions:
-                    active_phase_actions.extend(actions)
+                if active_phase_subtasks:
+                    active_phase_subtasks.append(PlanSubTask(actions=tuple(actions)))
                 else:
                     phases.append(PlanPhase(actions=tuple(actions)))
 
-        if active_phase_actions:
-            phases.append(PlanPhase(actions=tuple(active_phase_actions)))
+        if active_phase_subtasks:
+            phases.append(PlanPhase(subtasks=tuple(active_phase_subtasks)))
 
         return phases
 

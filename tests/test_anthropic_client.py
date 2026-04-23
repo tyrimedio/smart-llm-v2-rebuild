@@ -90,20 +90,30 @@ def _semantic_request() -> SemanticVerificationRequest:
     )
 
 
-def test_anthropic_client_forces_single_task_plan_tool() -> None:
-    payload = {
+def _plan_payload(skill: str = "GoToObject") -> dict[str, object]:
+    object_name = "Laptop"
+    return {
         "phases": [
             {
-                "actions": [
+                "subtasks": [
                     {
-                        "robots": ["robot1"],
-                        "skill": "GoToObject",
-                        "object_name": "Laptop",
+                        "assigned_robots": ["robot1"],
+                        "actions": [
+                            {
+                                "robots": ["robot1"],
+                                "skill": skill,
+                                "object_name": object_name,
+                            }
+                        ],
                     }
                 ]
             }
         ]
     }
+
+
+def test_anthropic_client_forces_single_task_plan_tool() -> None:
+    payload = _plan_payload()
     fake_client = FakeAnthropicClient(
         FakeMessage(content=[FakeToolUseBlock(name=TASK_PLAN_TOOL_NAME, payload=payload)])
     )
@@ -131,19 +141,7 @@ def test_anthropic_client_forces_single_task_plan_tool() -> None:
 
 
 def test_default_anthropic_path_uses_auto_tool_choice_when_thinking_is_enabled() -> None:
-    payload = {
-        "phases": [
-            {
-                "actions": [
-                    {
-                        "robots": ["robot1"],
-                        "skill": "GoToObject",
-                        "object_name": "Laptop",
-                    }
-                ]
-            }
-        ]
-    }
+    payload = _plan_payload()
     fake_client = FakeAnthropicClient(
         FakeMessage(content=[FakeToolUseBlock(name=TASK_PLAN_TOOL_NAME, payload=payload)])
     )
@@ -178,32 +176,8 @@ def test_anthropic_client_rejects_missing_tool_use_block() -> None:
 
 
 def test_anthropic_client_rejects_repeated_task_plan_tool_use_blocks() -> None:
-    first_payload = {
-        "phases": [
-            {
-                "actions": [
-                    {
-                        "robots": ["robot1"],
-                        "skill": "GoToObject",
-                        "object_name": "Laptop",
-                    }
-                ]
-            }
-        ]
-    }
-    second_payload = {
-        "phases": [
-            {
-                "actions": [
-                    {
-                        "robots": ["robot1"],
-                        "skill": "SwitchOn",
-                        "object_name": "Laptop",
-                    }
-                ]
-            }
-        ]
-    }
+    first_payload = _plan_payload()
+    second_payload = _plan_payload("SwitchOn")
     fake_client = FakeAnthropicClient(
         FakeMessage(
             content=[

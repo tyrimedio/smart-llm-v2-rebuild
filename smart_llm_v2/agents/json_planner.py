@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Mapping, Protocol, Sequence
 
 from smart_llm_v2.agents.model_profiles import ModelProfile
-from smart_llm_v2.agents.plan import ActionRequest, PlanPhase, TaskPlan
+from smart_llm_v2.agents.plan import ActionRequest, PlanPhase, PlanSubTask, TaskPlan
 from smart_llm_v2.agents.planner import PlanBuildResult, PlanningImage
 from smart_llm_v2.benchmark.models import BenchmarkTask
 from smart_llm_v2.robots import RobotSpec
@@ -124,8 +124,76 @@ class JsonAction:
 
 
 @dataclass(frozen=True, slots=True)
-class JsonPhase:
+class JsonSubTask:
     actions: tuple[JsonAction, ...]
+    assigned_robots: tuple[str, ...]
+    label: str | None = None
+
+    @classmethod
+    def from_mapping(
+        cls,
+        payload: Mapping[str, object],
+        *,
+        valid_robot_names: frozenset[str],
+        valid_skills: frozenset[str],
+        robot_skills_by_name: Mapping[str, frozenset[str]],
+        robot_mass_by_name: Mapping[str, float] | None = None,
+        scene_object_mass_by_name: Mapping[str, float] | None = None,
+    ) -> "JsonSubTask":
+        actions_payload = payload.get("actions")
+        if not isinstance(actions_payload, Sequence) or isinstance(actions_payload, (str, bytes)):
+            raise JsonPlanValidationError("Sub-task payload must contain an actions list")
+        actions = tuple(
+            JsonAction.from_mapping(
+                _mapping_item(action_payload, "actions"),
+                valid_robot_names=valid_robot_names,
+                valid_skills=valid_skills,
+                robot_skills_by_name=robot_skills_by_name,
+                robot_mass_by_name=robot_mass_by_name,
+                scene_object_mass_by_name=scene_object_mass_by_name,
+            )
+            for action_payload in actions_payload
+        )
+        if not actions:
+            raise JsonPlanValidationError("Sub-task payload must contain at least one action")
+        assigned_robots = _optional_tuple_of_strings(payload, "assigned_robots")
+        if assigned_robots is None:
+            assigned_robots = tuple(
+                dict.fromkeys(robot for action in actions for robot in action.robots)
+            )
+        if not assigned_robots:
+            raise JsonPlanValidationError("Sub-task payload requires at least one assigned robot")
+        if len(set(assigned_robots)) != len(assigned_robots):
+            raise JsonPlanValidationError("Sub-task payload cannot repeat the same assigned robot")
+        unknown_robots = [robot for robot in assigned_robots if robot not in valid_robot_names]
+        if unknown_robots:
+            raise JsonPlanValidationError(
+                f"Sub-task payload references unknown robots: {', '.join(unknown_robots)}"
+            )
+        action_robots = {robot for action in actions for robot in action.robots}
+        missing_robots = sorted(action_robots.difference(assigned_robots))
+        if missing_robots:
+            raise JsonPlanValidationError(
+                "Sub-task assigned_robots must include every action robot: "
+                + ", ".join(missing_robots)
+            )
+        return cls(
+            actions=actions,
+            assigned_robots=assigned_robots,
+            label=_optional_string(payload, "label"),
+        )
+
+    def to_plan_subtask(self) -> PlanSubTask:
+        return PlanSubTask(
+            actions=tuple(action.to_action_request() for action in self.actions),
+            assigned_robots=self.assigned_robots,
+            label=self.label,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class JsonPhase:
+    subtasks: tuple[JsonSubTask, ...]
     label: str | None = None
 
     @classmethod
@@ -139,30 +207,32 @@ class JsonPhase:
         robot_mass_by_name: Mapping[str, float] | None = None,
         scene_object_mass_by_name: Mapping[str, float] | None = None,
     ) -> "JsonPhase":
-        actions_payload = payload.get("actions")
-        if not isinstance(actions_payload, Sequence) or isinstance(actions_payload, (str, bytes)):
-            raise JsonPlanValidationError("Phase payload must contain an actions list")
-        actions = tuple(
-            JsonAction.from_mapping(
-                _mapping_item(action_payload, "actions"),
+        subtasks_payload = payload.get("subtasks")
+        if subtasks_payload is None:
+            subtasks_payload = (payload,)
+        if not isinstance(subtasks_payload, Sequence) or isinstance(subtasks_payload, (str, bytes)):
+            raise JsonPlanValidationError("Phase payload must contain a subtasks list")
+        subtasks = tuple(
+            JsonSubTask.from_mapping(
+                _mapping_item(subtask_payload, "subtasks"),
                 valid_robot_names=valid_robot_names,
                 valid_skills=valid_skills,
                 robot_skills_by_name=robot_skills_by_name,
                 robot_mass_by_name=robot_mass_by_name,
                 scene_object_mass_by_name=scene_object_mass_by_name,
             )
-            for action_payload in actions_payload
+            for subtask_payload in subtasks_payload
         )
-        if not actions:
-            raise JsonPlanValidationError("Phase payload must contain at least one action")
+        if not subtasks:
+            raise JsonPlanValidationError("Phase payload must contain at least one sub-task")
         return cls(
-            actions=actions,
+            subtasks=subtasks,
             label=_optional_string(payload, "label"),
         )
 
     def to_plan_phase(self) -> PlanPhase:
         return PlanPhase(
-            actions=tuple(action.to_action_request() for action in self.actions),
+            subtasks=tuple(subtask.to_plan_subtask() for subtask in self.subtasks),
             label=self.label,
         )
 
@@ -270,8 +340,10 @@ class JsonPlanner:
 DEFAULT_SYSTEM_MESSAGE = (
     "Plan the task using structured JSON only. Maximize successful task completion, "
     "respect robot skills, robot-team assignments, object constraints, and temporal "
-    "dependencies, and use safe parallelism where it helps. Prefer fewer robots only "
-    "as a tie-break when plans are otherwise equally good."
+    "dependencies, and use safe parallelism where it helps. Use phases for temporal "
+    "layers, sub-tasks for parallel work inside a phase, and actions for ordered "
+    "low-level robot skills inside each sub-task. Prefer fewer robots only as a "
+    "tie-break when plans are otherwise equally good."
 )
 
 
@@ -352,28 +424,47 @@ def task_plan_json_schema() -> dict[str, object]:
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
-                    "required": ["actions"],
+                    "required": ["subtasks"],
                     "properties": {
                         "label": {"type": "string"},
-                        "actions": {
+                        "subtasks": {
                             "type": "array",
                             "minItems": 1,
                             "items": {
                                 "type": "object",
                                 "additionalProperties": False,
-                                "required": ["robots", "skill"],
+                                "required": ["assigned_robots", "actions"],
                                 "properties": {
-                                    "robots": {
+                                    "label": {"type": "string"},
+                                    "assigned_robots": {
                                         "type": "array",
                                         "minItems": 1,
                                         "items": {"type": "string"},
                                     },
-                                    "skill": {
-                                        "type": "string",
-                                        "enum": sorted(skill.name for skill in ALL_SKILLS),
+                                    "actions": {
+                                        "type": "array",
+                                        "minItems": 1,
+                                        "items": {
+                                            "type": "object",
+                                            "additionalProperties": False,
+                                            "required": ["robots", "skill"],
+                                            "properties": {
+                                                "robots": {
+                                                    "type": "array",
+                                                    "minItems": 1,
+                                                    "items": {"type": "string"},
+                                                },
+                                                "skill": {
+                                                    "type": "string",
+                                                    "enum": sorted(
+                                                        skill.name for skill in ALL_SKILLS
+                                                    ),
+                                                },
+                                                "object_name": {"type": "string"},
+                                                "receptacle_name": {"type": "string"},
+                                            },
+                                        },
                                     },
-                                    "object_name": {"type": "string"},
-                                    "receptacle_name": {"type": "string"},
                                 },
                             },
                         },
@@ -410,6 +501,12 @@ def _tuple_of_strings(payload: Mapping[str, object], key: str) -> tuple[str, ...
             raise JsonPlanValidationError(f"Expected list of strings for {key!r}")
         strings.append(item)
     return tuple(strings)
+
+
+def _optional_tuple_of_strings(payload: Mapping[str, object], key: str) -> tuple[str, ...] | None:
+    if key not in payload:
+        return None
+    return _tuple_of_strings(payload, key)
 
 
 def _mapping_item(value: object, key: str) -> Mapping[str, object]:

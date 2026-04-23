@@ -19,6 +19,22 @@ from smart_llm_v2.robots import RobotSpec
 from smart_llm_v2.skills import SKILL_REGISTRY, get_skill
 
 _HANDOFF_SKILLS = frozenset({"PutObject", "DropHandObject", "ThrowObject"})
+_MUTATING_OBJECT_SKILLS = frozenset(
+    {
+        "PickupObject",
+        "PutObject",
+        "DropHandObject",
+        "ThrowObject",
+        "OpenObject",
+        "CloseObject",
+        "BreakObject",
+        "SliceObject",
+        "SwitchOn",
+        "SwitchOff",
+        "PushObject",
+        "PullObject",
+    }
+)
 
 PLAN_VERIFICATION_TOOL_NAME = "submit_plan_verification"
 DEFAULT_SEMANTIC_VERIFIER_SYSTEM_MESSAGE = (
@@ -241,6 +257,7 @@ def _deterministic_issues(
 ) -> tuple[VerificationIssue, ...]:
     issues: list[VerificationIssue] = []
     issues.extend(_contract_issues(robots=robots, plan=plan))
+    issues.extend(_same_phase_subtask_conflicts(scene_objects=scene_objects, plan=plan))
     issues.extend(
         _mass_capacity_issues(robots=robots, scene_objects=scene_objects, plan=plan)
     )
@@ -257,6 +274,23 @@ def _contract_issues(
     robots_by_name = {robot.name: robot for robot in robots}
 
     for phase_index, phase in enumerate(plan.phases):
+        for subtask_index, subtask in enumerate(phase.subtasks):
+            action_robots = {
+                robot_name for action in subtask.actions for robot_name in action.robots
+            }
+            missing_assigned_robots = sorted(action_robots.difference(subtask.assigned_robots))
+            if missing_assigned_robots:
+                issues.append(
+                    VerificationIssue(
+                        code="subtask_robot_mismatch",
+                        message=(
+                            f"Sub-task {subtask_index + 1} in phase {phase_index + 1} "
+                            "does not assign action robot(s): "
+                            f"{', '.join(missing_assigned_robots)}"
+                        ),
+                        phase_index=phase_index,
+                    )
+                )
         for action_index, action in enumerate(phase.actions):
             if len(set(action.robots)) != len(action.robots):
                 issues.append(
@@ -332,6 +366,57 @@ def _contract_issues(
                         action_index=action_index,
                     )
                 )
+    return issues
+
+
+def _same_phase_subtask_conflicts(
+    *,
+    scene_objects: Sequence[Mapping[str, object]],
+    plan: TaskPlan,
+) -> list[VerificationIssue]:
+    issues: list[VerificationIssue] = []
+
+    for phase_index, phase in enumerate(plan.phases):
+        if len(phase.subtasks) <= 1:
+            continue
+
+        robots_by_subtask: dict[str, int] = {}
+        resources_by_subtask: dict[str, int] = {}
+        for subtask_index, subtask in enumerate(phase.subtasks):
+            for robot_name in subtask.assigned_robots:
+                previous_index = robots_by_subtask.get(robot_name)
+                if previous_index is not None:
+                    issues.append(
+                        VerificationIssue(
+                            code="same_phase_robot_conflict",
+                            message=(
+                                f"{robot_name} is assigned to sub-tasks "
+                                f"{previous_index + 1} and {subtask_index + 1} in "
+                                f"phase {phase_index + 1}"
+                            ),
+                            phase_index=phase_index,
+                        )
+                    )
+                robots_by_subtask.setdefault(robot_name, subtask_index)
+
+            for resource_key in _mutated_resource_keys(
+                actions=subtask.actions,
+                scene_objects=scene_objects,
+            ):
+                previous_index = resources_by_subtask.get(resource_key)
+                if previous_index is not None:
+                    issues.append(
+                        VerificationIssue(
+                            code="same_phase_resource_conflict",
+                            message=(
+                                f"Sub-tasks {previous_index + 1} and {subtask_index + 1} "
+                                f"in phase {phase_index + 1} mutate the same resource "
+                                f"{resource_key!r}"
+                            ),
+                            phase_index=phase_index,
+                        )
+                    )
+                resources_by_subtask.setdefault(resource_key, subtask_index)
     return issues
 
 
@@ -419,36 +504,51 @@ def _temporal_issues(
     open_state_by_object = _scene_open_state_index(scene_objects)
 
     for phase_index, phase in enumerate(plan.phases):
-        phase_holds = dict(held_objects_by_robot)
-        phase_open_state = dict(open_state_by_object)
-        for action_index, action in enumerate(phase.actions):
-            issues.extend(
-                _holding_state_issues(
-                    action=action,
-                    phase_index=phase_index,
-                    action_index=action_index,
-                    scene_objects=scene_objects,
-                    held_objects_by_robot=phase_holds,
+        next_holds = dict(held_objects_by_robot)
+        next_open_state = dict(open_state_by_object)
+        action_offset = 0
+        for subtask in phase.subtasks:
+            subtask_holds = dict(held_objects_by_robot)
+            subtask_open_state = dict(open_state_by_object)
+            for action_index, action in enumerate(subtask.actions, start=action_offset):
+                issues.extend(
+                    _holding_state_issues(
+                        action=action,
+                        phase_index=phase_index,
+                        action_index=action_index,
+                        scene_objects=scene_objects,
+                        held_objects_by_robot=subtask_holds,
+                    )
                 )
-            )
-            issues.extend(
-                _receptacle_state_issues(
-                    action=action,
-                    phase_index=phase_index,
-                    action_index=action_index,
-                    scene_objects=scene_objects,
-                    open_state_by_object=phase_open_state,
+                issues.extend(
+                    _receptacle_state_issues(
+                        action=action,
+                        phase_index=phase_index,
+                        action_index=action_index,
+                        scene_objects=scene_objects,
+                        open_state_by_object=subtask_open_state,
+                    )
                 )
+                _apply_action_effect(
+                    action=action,
+                    scene_objects=scene_objects,
+                    next_holds=subtask_holds,
+                    next_open_state=subtask_open_state,
+                    current_holds=subtask_holds,
+                )
+            _merge_holding_effects(
+                base_holds=held_objects_by_robot,
+                final_holds=subtask_holds,
+                next_holds=next_holds,
             )
-            _apply_action_effect(
-                action=action,
-                scene_objects=scene_objects,
-                next_holds=phase_holds,
-                next_open_state=phase_open_state,
-                current_holds=phase_holds,
+            _merge_open_state_effects(
+                base_open_state=open_state_by_object,
+                final_open_state=subtask_open_state,
+                next_open_state=next_open_state,
             )
-        held_objects_by_robot = phase_holds
-        open_state_by_object = phase_open_state
+            action_offset += len(subtask.actions)
+        held_objects_by_robot = next_holds
+        open_state_by_object = next_open_state
     return issues
 
 
@@ -649,6 +749,54 @@ def _scene_mass_index(
     return masses
 
 
+def _mutated_resource_keys(
+    *,
+    actions: Sequence[ActionRequest],
+    scene_objects: Sequence[Mapping[str, object]],
+) -> set[str]:
+    resource_keys: set[str] = set()
+    for action in actions:
+        if action.skill not in _MUTATING_OBJECT_SKILLS:
+            continue
+        if action.object_name is not None:
+            resource_keys.update(_matching_object_keys(action.object_name, scene_objects))
+        if action.skill == "PutObject" and action.receptacle_name is not None:
+            resource_keys.update(_matching_object_keys(action.receptacle_name, scene_objects))
+    return resource_keys
+
+
+def _merge_holding_effects(
+    *,
+    base_holds: Mapping[str, str],
+    final_holds: Mapping[str, str],
+    next_holds: dict[str, str],
+) -> None:
+    for robot_name in set(base_holds).union(final_holds):
+        if final_holds.get(robot_name) == base_holds.get(robot_name):
+            continue
+        held_object = final_holds.get(robot_name)
+        if held_object is None:
+            next_holds.pop(robot_name, None)
+        else:
+            next_holds[robot_name] = held_object
+
+
+def _merge_open_state_effects(
+    *,
+    base_open_state: Mapping[str, bool],
+    final_open_state: Mapping[str, bool],
+    next_open_state: dict[str, bool],
+) -> None:
+    for object_key in set(base_open_state).union(final_open_state):
+        if final_open_state.get(object_key) == base_open_state.get(object_key):
+            continue
+        is_open = final_open_state.get(object_key)
+        if is_open is None:
+            next_open_state.pop(object_key, None)
+        else:
+            next_open_state[object_key] = is_open
+
+
 def _pickup_claim_key(
     *,
     object_name: str,
@@ -805,14 +953,21 @@ def _plan_payload(plan: TaskPlan) -> dict[str, object]:
         "phases": [
             {
                 "label": phase.label,
-                "actions": [
+                "subtasks": [
                     {
-                        "robots": list(action.robots),
-                        "skill": action.skill,
-                        "object_name": action.object_name,
-                        "receptacle_name": action.receptacle_name,
+                        "label": subtask.label,
+                        "assigned_robots": list(subtask.assigned_robots),
+                        "actions": [
+                            {
+                                "robots": list(action.robots),
+                                "skill": action.skill,
+                                "object_name": action.object_name,
+                                "receptacle_name": action.receptacle_name,
+                            }
+                            for action in subtask.actions
+                        ],
                     }
-                    for action in phase.actions
+                    for subtask in phase.subtasks
                 ],
             }
             for phase in plan.phases

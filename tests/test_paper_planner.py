@@ -148,6 +148,8 @@ wash_fork([robots[1]])
 
     assert plan.planner_name == "paper-ast-parser"
     assert plan.transition_count == 0
+    assert len(plan.phases[0].subtasks) == 1
+    assert plan.phases[0].subtasks[0].assigned_robots == ("robot2",)
     assert plan.phases[0].actions == (
         ActionRequest(robots=("robot2",), skill="GoToObject", object_name="Fork"),
         ActionRequest(robots=("robot2",), skill="PickupObject", object_name="Fork"),
@@ -187,6 +189,8 @@ slice_potato([robots[0], robots[2]])
     plan = parser.parse(task=task, robots=robots, artifacts=artifacts)
 
     assert plan.transition_count == 0
+    assert len(plan.phases[0].subtasks) == 1
+    assert plan.phases[0].subtasks[0].assigned_robots == ("robot3", "robot1")
     assert plan.phases[0].actions == (
         ActionRequest(robots=("robot3",), skill="GoToObject", object_name="Knife"),
         ActionRequest(robots=("robot3",), skill="PickupObject", object_name="Knife"),
@@ -267,6 +271,9 @@ t1.join()
 
     assert len(plan.phases) == 1
     assert plan.transition_count == 0
+    assert len(plan.phases[0].subtasks) == 2
+    assert plan.phases[0].subtasks[0].assigned_robots == ("robot1",)
+    assert plan.phases[0].subtasks[1].assigned_robots == ("robot2",)
     assert plan.phases[0].actions == (
         ActionRequest(robots=("robot1",), skill="PickupObject", object_name="Mug"),
         ActionRequest(robots=("robot2",), skill="GoToObject", object_name="LightSwitch"),
