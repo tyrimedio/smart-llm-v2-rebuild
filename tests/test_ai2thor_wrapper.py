@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from smart_llm_v2.env.ai2thor_wrapper import Ai2ThorEnvironment
+from smart_llm_v2.env.config import Ai2ThorConfig
 
 
 class RecordingController:
@@ -70,3 +71,18 @@ def test_perform_action_uses_agent_specific_object_distances() -> None:
             "objectId": "Mug|B",
         },
     ]
+
+
+def test_step_delay_slows_simulator_steps(monkeypatch) -> None:
+    sleeps: list[float] = []
+    environment = Ai2ThorEnvironment(config=Ai2ThorConfig(step_delay_seconds=0.25))
+    environment._controller = RecordingController()
+    monkeypatch.setattr("smart_llm_v2.env.ai2thor_wrapper.time.sleep", sleeps.append)
+
+    environment.perform_action(
+        agent_id=0,
+        action_name="PickupObject",
+        target_name="Mug",
+    )
+
+    assert sleeps == [0.25]

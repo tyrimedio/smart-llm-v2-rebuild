@@ -84,6 +84,47 @@ def test_structured_control_profile_defaults_come_from_env(monkeypatch) -> None:
     assert profile.vision_enabled is True
 
 
+def test_load_dotenv_sets_missing_environment_values(monkeypatch, tmp_path) -> None:
+    module = _load_experiment_module()
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        "\n".join(
+            [
+                "# local keys",
+                "MOONSHOT_API_KEY=moonshot-local",
+                "OPENAI_API_KEY='openai-local'",
+                'ANTHROPIC_API_KEY="anthropic-local"',
+                "SMART_LLM_V2_PROVIDER=kimi # cheap first",
+                "export SMART_LLM_V2_PROFILE_VARIANT=symbolic",
+            ]
+        )
+    )
+    monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("SMART_LLM_V2_PROVIDER", raising=False)
+    monkeypatch.delenv("SMART_LLM_V2_PROFILE_VARIANT", raising=False)
+
+    module.load_dotenv(dotenv_path)
+
+    assert module.os.environ["MOONSHOT_API_KEY"] == "moonshot-local"
+    assert module.os.environ["OPENAI_API_KEY"] == "openai-local"
+    assert module.os.environ["ANTHROPIC_API_KEY"] == "anthropic-local"
+    assert module.os.environ["SMART_LLM_V2_PROVIDER"] == "kimi"
+    assert module.os.environ["SMART_LLM_V2_PROFILE_VARIANT"] == "symbolic"
+
+
+def test_load_dotenv_does_not_override_exported_values(monkeypatch, tmp_path) -> None:
+    module = _load_experiment_module()
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("MOONSHOT_API_KEY=from-file\n")
+    monkeypatch.setenv("MOONSHOT_API_KEY", "from-shell")
+
+    module.load_dotenv(dotenv_path)
+
+    assert module.os.environ["MOONSHOT_API_KEY"] == "from-shell"
+
+
 def test_task_run_payload_includes_provider_model_and_usage_metadata() -> None:
     module = _load_experiment_module()
     task = BenchmarkTask(
@@ -191,6 +232,7 @@ def test_structured_control_writes_results_before_reporting_failed_tasks(
         },
     )
     writes: list[dict[str, object]] = []
+    loaded_dotenv_paths: list[Path] = []
 
     monkeypatch.setattr(
         module,
@@ -209,6 +251,7 @@ def test_structured_control_writes_results_before_reporting_failed_tasks(
             seed=0,
         ),
     )
+    monkeypatch.setattr(module, "load_dotenv", lambda path: loaded_dotenv_paths.append(path))
     monkeypatch.setattr(module, "select_tasks", lambda **kwargs: [task])
     monkeypatch.setattr(module, "resolve_output_dir", lambda _: tmp_path)
     monkeypatch.setattr(
@@ -246,3 +289,4 @@ def test_structured_control_writes_results_before_reporting_failed_tasks(
 
     assert len(writes) == 1
     assert writes[0]["task_runs"] == summary.task_runs
+    assert loaded_dotenv_paths == [module.PROJECT_ROOT / ".env"]

@@ -1,0 +1,11 @@
+{
+  "failed_task_count": 10,
+  "mean_metrics": {
+    "executability": 0.4803909824743159,
+    "goal_condition_recall": 0.5694444444444444,
+    "robot_utilization": 0.5277777777777778,
+    "success_rate": 0.4444444444444444,
+    "task_completion_rate": 0.5555555555555556
+  },
+  "task_count": 36
+}
