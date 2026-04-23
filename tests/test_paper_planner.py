@@ -280,6 +280,41 @@ t1.join()
     )
 
 
+def test_ast_paper_parser_keeps_sequential_main_thread_actions_in_one_subtask() -> None:
+    parser = AstPaperPlanParser()
+    robots = build_task_robot_team((24, 25))
+    task = BenchmarkTask(
+        floor_plan=1,
+        task_index=5,
+        instruction="Turn on the switch while another robot picks up the mug",
+        robot_ids=(24, 25),
+    )
+    artifacts = PaperPlannerArtifacts(
+        decomposition="",
+        allocation_solution="# ordered main-thread actions",
+        code_solution="""
+def pick_up_mug(robot_list):
+    PickupObject(robot_list[0], 'Mug')
+
+t1 = threading.Thread(target=pick_up_mug, args=([robots[0]],))
+t1.start()
+GoToObject(robots[1], 'LightSwitch')
+SwitchOn(robots[1], 'LightSwitch')
+t1.join()
+""",
+    )
+
+    plan = parser.parse(task=task, robots=robots, artifacts=artifacts)
+
+    assert len(plan.phases) == 1
+    assert len(plan.phases[0].subtasks) == 2
+    assert plan.phases[0].subtasks[1].assigned_robots == ("robot2",)
+    assert plan.phases[0].subtasks[1].actions == (
+        ActionRequest(robots=("robot2",), skill="GoToObject", object_name="LightSwitch"),
+        ActionRequest(robots=("robot2",), skill="SwitchOn", object_name="LightSwitch"),
+    )
+
+
 def test_ast_paper_parser_rejects_malformed_function_calls() -> None:
     parser = AstPaperPlanParser()
     robots = build_task_robot_team((1, 2, 3))

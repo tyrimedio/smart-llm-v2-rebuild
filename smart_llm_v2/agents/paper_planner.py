@@ -356,6 +356,14 @@ class _PaperAstParser:
         phases: list[PlanPhase] = []
         thread_calls: dict[str, ast.Call] = {}
         active_phase_subtasks: list[PlanSubTask] = []
+        active_main_thread_actions: list[ActionRequest] = []
+
+        def append_active_main_thread_subtask() -> None:
+            if active_main_thread_actions:
+                active_phase_subtasks.append(
+                    PlanSubTask(actions=tuple(active_main_thread_actions))
+                )
+                active_main_thread_actions.clear()
 
         for statement in self.module.body:
             if isinstance(statement, ast.FunctionDef):
@@ -379,6 +387,7 @@ class _PaperAstParser:
 
             if self._is_thread_join(statement):
                 if active_phase_subtasks:
+                    append_active_main_thread_subtask()
                     phases.append(PlanPhase(subtasks=tuple(active_phase_subtasks)))
                     active_phase_subtasks.clear()
                 continue
@@ -386,11 +395,12 @@ class _PaperAstParser:
             actions = self._actions_from_statement(statement, bindings={})
             if actions:
                 if active_phase_subtasks:
-                    active_phase_subtasks.append(PlanSubTask(actions=tuple(actions)))
+                    active_main_thread_actions.extend(actions)
                 else:
                     phases.append(PlanPhase(actions=tuple(actions)))
 
         if active_phase_subtasks:
+            append_active_main_thread_subtask()
             phases.append(PlanPhase(subtasks=tuple(active_phase_subtasks)))
 
         return phases
