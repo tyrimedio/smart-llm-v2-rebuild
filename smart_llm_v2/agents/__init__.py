@@ -19,6 +19,7 @@ from smart_llm_v2.agents.json_planner import (
     JsonPlanner,
     JsonPlannerRequest,
     JsonPlanningClient,
+    JsonSubTask,
     JsonTaskPlan,
     build_planning_context,
     task_plan_json_schema,
@@ -46,7 +47,7 @@ from smart_llm_v2.agents.paper_planner import (
     PaperPromptAssets,
     PaperStagedPlanner,
 )
-from smart_llm_v2.agents.plan import ActionRequest, PlanPhase, TaskPlan
+from smart_llm_v2.agents.plan import ActionRequest, PlanPhase, PlanSubTask, TaskPlan
 from smart_llm_v2.agents.planner import PlanBuildResult, Planner, PlanningImage
 from smart_llm_v2.agents.provider_factory import (
     build_json_planner,
@@ -90,6 +91,7 @@ __all__ = [
     "JsonPlannerRequest",
     "JsonPlanningClient",
     "JsonPlanValidationError",
+    "JsonSubTask",
     "JsonTaskPlan",
     "MODEL_ENV_VAR",
     "ModelProfile",
@@ -101,6 +103,7 @@ __all__ = [
     "PLAN_VERIFICATION_TOOL_NAME",
     "PlanBuildResult",
     "PlanPhase",
+    "PlanSubTask",
     "PlanVerificationResult",
     "PlanVerifier",
     "Planner",

@@ -16,9 +16,42 @@ class ActionRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class PlanPhase:
+class PlanSubTask:
     actions: tuple[ActionRequest, ...]
+    assigned_robots: tuple[str, ...] = ()
     label: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.actions:
+            raise ValueError("PlanSubTask requires at least one action")
+        if self.assigned_robots:
+            return
+        robots = tuple(dict.fromkeys(robot for action in self.actions for robot in action.robots))
+        object.__setattr__(self, "assigned_robots", robots)
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class PlanPhase:
+    subtasks: tuple[PlanSubTask, ...]
+    label: str | None = None
+
+    def __init__(
+        self,
+        *,
+        subtasks: tuple[PlanSubTask, ...] | None = None,
+        actions: tuple[ActionRequest, ...] | None = None,
+        label: str | None = None,
+    ) -> None:
+        if subtasks is not None and actions is not None:
+            raise ValueError("PlanPhase accepts either subtasks or actions, not both")
+        if subtasks is None:
+            subtasks = (PlanSubTask(actions=actions),) if actions else ()
+        object.__setattr__(self, "subtasks", subtasks)
+        object.__setattr__(self, "label", label)
+
+    @property
+    def actions(self) -> tuple[ActionRequest, ...]:
+        return tuple(action for subtask in self.subtasks for action in subtask.actions)
 
 
 @dataclass(frozen=True, slots=True)

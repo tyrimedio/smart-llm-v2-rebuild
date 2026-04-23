@@ -83,7 +83,7 @@ def _response(*, payload: dict[str, object], tool_name: str = "submit_task_plan"
                             function=SimpleNamespace(
                                 name=tool_name,
                                 arguments=(
-                                    '{"phases":[{"actions":[{"robots":["robot1"],"skill":"GoToObject","object_name":"Laptop"}]}]}'
+                                    '{"phases":[{"subtasks":[{"assigned_robots":["robot1"],"actions":[{"robots":["robot1"],"skill":"GoToObject","object_name":"Laptop"}]}]}]}'
                                     if not payload
                                     else json.dumps(payload)
                                 ),
@@ -118,11 +118,16 @@ def test_openai_client_forces_single_task_plan_tool_and_normalizes_usage() -> No
     assert result.payload == {
         "phases": [
             {
-                "actions": [
+                "subtasks": [
                     {
-                        "robots": ["robot1"],
-                        "skill": "GoToObject",
-                        "object_name": "Laptop",
+                        "assigned_robots": ["robot1"],
+                        "actions": [
+                            {
+                                "robots": ["robot1"],
+                                "skill": "GoToObject",
+                                "object_name": "Laptop",
+                            }
+                        ],
                     }
                 ]
             }

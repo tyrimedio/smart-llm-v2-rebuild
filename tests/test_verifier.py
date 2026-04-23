@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from smart_llm_v2.agents.paper_planner import AstPaperPlanParser, PaperPlannerArtifacts
-from smart_llm_v2.agents.plan import ActionRequest, PlanPhase, TaskPlan
+from smart_llm_v2.agents.plan import ActionRequest, PlanPhase, PlanSubTask, TaskPlan
 from smart_llm_v2.agents.verifier import (
     PlanVerifier,
     SemanticVerificationResult,
@@ -70,6 +70,131 @@ def test_verifier_allows_ordered_reuse_of_one_resource_within_a_phase() -> None:
         task=_task(),
         robots=build_task_robot_team((1,)),
         scene_objects=({"name": "Fridge|0", "isOpen": False},),
+        plan=plan,
+    )
+
+    assert result.passed is True
+
+
+def test_verifier_rejects_same_robot_assigned_to_parallel_subtasks() -> None:
+    plan = TaskPlan(
+        phases=(
+            PlanPhase(
+                subtasks=(
+                    PlanSubTask(
+                        actions=(
+                            ActionRequest(
+                                robots=("robot1",),
+                                skill="GoToObject",
+                                object_name="Fridge",
+                            ),
+                        )
+                    ),
+                    PlanSubTask(
+                        actions=(
+                            ActionRequest(
+                                robots=("robot1",),
+                                skill="GoToObject",
+                                object_name="Mug",
+                            ),
+                        )
+                    ),
+                )
+            ),
+        )
+    )
+
+    result = PlanVerifier().verify(
+        task=_task(),
+        robots=build_task_robot_team((1,)),
+        scene_objects=(),
+        plan=plan,
+    )
+
+    assert result.passed is False
+    assert result.issues[0].code == "same_phase_robot_conflict"
+
+
+def test_verifier_rejects_state_dependency_between_parallel_subtasks() -> None:
+    plan = TaskPlan(
+        phases=(
+            PlanPhase(
+                actions=(
+                    ActionRequest(robots=("robot2",), skill="PickupObject", object_name="Mug"),
+                )
+            ),
+            PlanPhase(
+                subtasks=(
+                    PlanSubTask(
+                        actions=(
+                            ActionRequest(
+                                robots=("robot1",),
+                                skill="OpenObject",
+                                object_name="Fridge",
+                            ),
+                        )
+                    ),
+                    PlanSubTask(
+                        actions=(
+                            ActionRequest(
+                                robots=("robot2",),
+                                skill="PutObject",
+                                object_name="Mug",
+                                receptacle_name="Fridge",
+                            ),
+                        )
+                    ),
+                )
+            ),
+        )
+    )
+
+    result = PlanVerifier().verify(
+        task=_task(),
+        robots=build_task_robot_team((1, 2)),
+        scene_objects=({"name": "Fridge|0", "isOpen": False},),
+        plan=plan,
+    )
+
+    assert result.passed is False
+    assert "closed_receptacle" in {issue.code for issue in result.issues}
+
+
+def test_verifier_allows_independent_parallel_subtasks() -> None:
+    plan = TaskPlan(
+        phases=(
+            PlanPhase(
+                subtasks=(
+                    PlanSubTask(
+                        actions=(
+                            ActionRequest(
+                                robots=("robot1",),
+                                skill="SwitchOn",
+                                object_name="LightSwitch",
+                            ),
+                        )
+                    ),
+                    PlanSubTask(
+                        actions=(
+                            ActionRequest(
+                                robots=("robot2",),
+                                skill="PickupObject",
+                                object_name="Mug",
+                            ),
+                        )
+                    ),
+                )
+            ),
+        )
+    )
+
+    result = PlanVerifier().verify(
+        task=_task(),
+        robots=build_task_robot_team((1, 2)),
+        scene_objects=(
+            {"name": "LightSwitch|0", "objectType": "LightSwitch"},
+            {"name": "Mug|0", "objectType": "Mug"},
+        ),
         plan=plan,
     )
 

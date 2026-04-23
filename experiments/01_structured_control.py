@@ -223,14 +223,21 @@ def task_run_payload(task_run: TaskRunResult) -> dict[str, object]:
         "plan": [
             {
                 "label": phase.label,
-                "actions": [
+                "subtasks": [
                     {
-                        "robots": list(action.robots),
-                        "skill": action.skill,
-                        "object_name": action.object_name,
-                        "receptacle_name": action.receptacle_name,
+                        "label": subtask.label,
+                        "assigned_robots": list(subtask.assigned_robots),
+                        "actions": [
+                            {
+                                "robots": list(action.robots),
+                                "skill": action.skill,
+                                "object_name": action.object_name,
+                                "receptacle_name": action.receptacle_name,
+                            }
+                            for action in subtask.actions
+                        ],
                     }
-                    for action in phase.actions
+                    for subtask in phase.subtasks
                 ],
             }
             for phase in task_run.plan.phases

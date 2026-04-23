@@ -76,11 +76,12 @@ class BaselineExecutor:
         # Phases preserve the paper's transition-count metric even before
         # we introduce true concurrent execution.
         for phase in plan.phases:
-            if not phase.actions:
+            if not phase.subtasks:
                 continue
             executed_phases += 1
-            for action in phase.actions:
-                records.append(self.execute_step(action))
+            for subtask in phase.subtasks:
+                for action in subtask.actions:
+                    records.append(self.execute_step(action))
 
         successful_actions = sum(record.succeeded for record in records)
         total_actions = len(records)
