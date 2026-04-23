@@ -175,6 +175,7 @@ def test_kimi_client_uses_same_transport_but_keeps_kimi_provider() -> None:
 
     assert result.provider == "kimi"
     assert result.model == "kimi-k2.6"
+    assert create_call["extra_body"] == {"thinking": {"type": "disabled"}}
     assert image_part["image_url"]["url"].startswith("data:image/png;base64,")
     assert "detail" not in image_part["image_url"]
 
@@ -271,3 +272,20 @@ def test_openai_semantic_verifier_forces_verification_tool_and_normalizes_usage(
     }
     assert "submit_plan_verification tool exactly once" in create_call["messages"][1]["content"][0]["text"]
     assert create_call["messages"][1]["content"][2]["image_url"]["detail"] == "low"
+
+
+def test_kimi_semantic_verifier_disables_thinking_for_specified_tool_choice() -> None:
+    fake_client = FakeOpenAIClient(_response(payload={"issues": []}, tool_name=PLAN_VERIFICATION_TOOL_NAME))
+    client = OpenAICompatibleSemanticVerifierClient(
+        provider="kimi",
+        model="kimi-k2.6",
+        api_key_env_var="MOONSHOT_API_KEY",
+        client=fake_client,
+    )
+
+    result = client.review(_semantic_request(provider="kimi"))
+
+    assert result.provider == "kimi"
+    assert fake_client.chat.completions.calls[0]["extra_body"] == {
+        "thinking": {"type": "disabled"}
+    }

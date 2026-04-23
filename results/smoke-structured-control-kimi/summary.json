@@ -1,0 +1,11 @@
+{
+  "failed_task_count": 0,
+  "mean_metrics": {
+    "executability": 0.5,
+    "goal_condition_recall": 1.0,
+    "robot_utilization": 1.0,
+    "success_rate": 1.0,
+    "task_completion_rate": 1.0
+  },
+  "task_count": 1
+}

@@ -63,6 +63,8 @@ class OpenAICompatibleToolUseJsonClient:
             create_kwargs["top_p"] = self.top_p
         if self.reasoning_effort is not None:
             create_kwargs["reasoning_effort"] = self.reasoning_effort
+        if self.provider == Provider.KIMI.value:
+            create_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
 
         response = self._client().chat.completions.create(**create_kwargs)
         payload = _extract_tool_payload(response)
@@ -145,6 +147,8 @@ class OpenAICompatibleSemanticVerifierClient:
             create_kwargs["top_p"] = self.top_p
         if self.reasoning_effort is not None:
             create_kwargs["reasoning_effort"] = self.reasoning_effort
+        if self.provider == Provider.KIMI.value:
+            create_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
 
         response = self._client().chat.completions.create(**create_kwargs)
         payload = _extract_named_tool_payload(response, tool_name=PLAN_VERIFICATION_TOOL_NAME)

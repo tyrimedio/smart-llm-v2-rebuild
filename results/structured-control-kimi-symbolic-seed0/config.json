@@ -1,0 +1,12 @@
+{
+  "base_url": "https://api.moonshot.ai/v1",
+  "floor_plan": null,
+  "limit": null,
+  "max_tokens": null,
+  "model": "kimi-k2.6",
+  "profile_variant": "symbolic",
+  "provider": "kimi",
+  "seed": 0,
+  "task_id": null,
+  "temperature": null
+}

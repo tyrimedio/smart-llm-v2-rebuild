@@ -19,3 +19,4 @@ class Ai2ThorConfig:
     navigation_goal_threshold: float = 0.25
     navigation_stall_threshold: int = 8
     add_third_party_camera: bool = False
+    step_delay_seconds: float = 0.0

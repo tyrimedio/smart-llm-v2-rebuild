@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +24,7 @@ from smart_llm_v2.env.ai2thor_wrapper import Ai2ThorEnvironment
 
 
 def main() -> None:
+    load_dotenv(PROJECT_ROOT / ".env")
     args = parse_args()
     logger = configure_logging()
     tasks = select_tasks(
@@ -96,6 +98,40 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--output-dir", type=Path)
     return parser.parse_args(argv)
+
+
+def load_dotenv(path: Path) -> None:
+    if not path.exists():
+        return
+
+    for line in path.read_text().splitlines():
+        parsed = parse_dotenv_line(line)
+        if parsed is None:
+            continue
+        key, value = parsed
+        os.environ.setdefault(key, value)
+
+
+def parse_dotenv_line(line: str) -> tuple[str, str] | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return None
+    if stripped.startswith("export "):
+        stripped = stripped.removeprefix("export ").strip()
+    if "=" not in stripped:
+        return None
+
+    key, value = stripped.split("=", 1)
+    key = key.strip()
+    if not key:
+        return None
+    return key, _parse_dotenv_value(value.strip())
+
+
+def _parse_dotenv_value(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value.split(" #", 1)[0].strip()
 
 
 def resolve_planner_profile(args: argparse.Namespace) -> ModelProfile:

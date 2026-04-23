@@ -4,6 +4,7 @@ import io
 import math
 import random
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -249,7 +250,10 @@ class Ai2ThorEnvironment:
         return self._controller
 
     def _step(self, **kwargs: Any) -> Any:
-        return self._require_controller().step(**kwargs)
+        event = self._require_controller().step(**kwargs)
+        if self.config.step_delay_seconds > 0:
+            time.sleep(self.config.step_delay_seconds)
+        return event
 
 
 def _load_controller_class() -> Any:
