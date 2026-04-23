@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from smart_llm_v2.agents.plan import ActionRequest, PlanPhase, TaskPlan
 from smart_llm_v2.agents.planner import PlanBuildResult, PlanningImage
+from smart_llm_v2.agents.verifier import PlanVerifier, SemanticVerificationResult
 from smart_llm_v2.benchmark.models import BenchmarkTask, GoalState
 from smart_llm_v2.benchmark.runner import BenchmarkRunner
 from smart_llm_v2.robots import RobotSpec
@@ -67,7 +68,7 @@ class FakeExecutor:
             records=records,
             observed_objects=self._observed_objects,
             transition_count=plan.transition_count,
-            successful_actions=len(records),
+            successful_actions=sum(record.succeeded for record in records),
             total_actions=len(records),
         )
 
@@ -83,6 +84,16 @@ class FakeExecutorFactory:
     def __call__(self, *, task: BenchmarkTask, robots: tuple[RobotSpec, ...]) -> FakeExecutor:
         self.calls.append((task.instruction, tuple(robot.name for robot in robots)))
         return self.executor
+
+
+class FakeSemanticClient:
+    def __init__(self, result: SemanticVerificationResult) -> None:
+        self.result = result
+        self.requests = []
+
+    def review(self, request):
+        self.requests.append(request)
+        return self.result
 
 
 def test_task_plan_tracks_parallel_phase_transitions() -> None:
@@ -201,6 +212,88 @@ def test_benchmark_runner_skips_image_capture_for_symbolic_planners() -> None:
     runner.run_task(task)
 
     assert planner.calls[0]["planning_images"] == ()
+
+
+def test_benchmark_runner_blocks_execution_when_verifier_rejects_plan() -> None:
+    task = BenchmarkTask(
+        floor_plan=1,
+        task_index=2,
+        instruction="Put the mug in the fridge",
+        robot_ids=(1,),
+    )
+    plan = TaskPlan(
+        phases=(
+            PlanPhase(
+                actions=(
+                    ActionRequest(
+                        robots=("robot1",),
+                        skill="PutObject",
+                        object_name="Mug",
+                        receptacle_name="Fridge",
+                    ),
+                )
+            ),
+        )
+    )
+    planner = FakePlanner(plan, uses_planning_images=False)
+    executor = FakeExecutor(({"name": "Fridge|0", "isOpen": False},))
+    runner = BenchmarkRunner(
+        planner=planner,
+        executor_factory=FakeExecutorFactory(executor),
+        verifier=PlanVerifier(),
+    )
+
+    result = runner.run_task(task)
+
+    assert result.error_message is not None
+    assert result.execution.total_actions == 0
+    assert result.plan == plan
+    assert executor.received_plan is None
+    assert {issue.code for issue in result.verification_issues} == {
+        "closed_receptacle",
+        "missing_pickup_before_handoff",
+    }
+
+
+def test_benchmark_runner_records_verifier_metadata_when_semantic_review_runs() -> None:
+    task = BenchmarkTask(
+        floor_plan=303,
+        task_index=1,
+        instruction="Turn on the laptop",
+        robot_ids=(24,),
+        goal_states=(GoalState(name="Laptop", state="ON"),),
+    )
+    plan = TaskPlan.sequential(
+        ActionRequest(robots=("robot1",), skill="SwitchOn", object_name="Laptop"),
+    )
+    planner = FakePlanner(plan)
+    planning_image = PlanningImage(data=b"png", agent_id=0, label="agent_0_egocentric")
+    executor = FakeExecutor(
+        ({"name": "Laptop|0", "isToggled": True},),
+        planning_images=(planning_image,),
+    )
+    semantic_client = FakeSemanticClient(
+        SemanticVerificationResult(
+            provider="openai",
+            model="gpt-5.4",
+            usage={"reasoning_tokens": 8},
+        )
+    )
+    runner = BenchmarkRunner(
+        planner=planner,
+        executor_factory=FakeExecutorFactory(executor),
+        verifier=PlanVerifier(semantic_client=semantic_client),
+    )
+
+    result = runner.run_task(task)
+
+    assert result.error_message is None
+    assert result.verifier_provider == "openai"
+    assert result.verifier_model == "gpt-5.4"
+    assert result.verifier_usage == {"reasoning_tokens": 8}
+    assert result.verification_issues == ()
+    assert len(semantic_client.requests) == 1
+    assert semantic_client.requests[0].images == (planning_image,)
 
 
 def test_benchmark_summary_averages_task_metrics() -> None:

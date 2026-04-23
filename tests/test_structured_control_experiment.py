@@ -128,6 +128,8 @@ def test_task_run_payload_includes_provider_model_and_usage_metadata() -> None:
     assert payload["planner_model"] == "claude-opus-4-7"
     assert payload["planner_profile_variant"] == "symbolic"
     assert payload["planner_usage"] == {"input_tokens": 10, "output_tokens": 5}
+    assert "verifier_provider" not in payload
+    assert "verification_issues" not in payload
 
 
 def test_structured_control_writes_results_before_reporting_failed_tasks(

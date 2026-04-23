@@ -32,6 +32,18 @@ class ExecutionRecord:
     request: ActionRequest
     succeeded: bool
     error_message: str = ""
+    successful_simulator_calls: int | None = None
+    total_simulator_calls: int | None = None
+
+    def __post_init__(self) -> None:
+        total_calls = self.total_simulator_calls
+        if total_calls is None:
+            total_calls = len(self.request.robots)
+            object.__setattr__(self, "total_simulator_calls", total_calls)
+
+        if self.successful_simulator_calls is None:
+            successful_calls = total_calls if self.succeeded else 0
+            object.__setattr__(self, "successful_simulator_calls", successful_calls)
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,13 +83,14 @@ class BaselineExecutor:
                 records.append(self.execute_step(action))
 
         successful_actions = sum(record.succeeded for record in records)
+        total_actions = len(records)
         return ExecutionReport(
             plan=plan,
             records=tuple(records),
             observed_objects=tuple(self.scene_objects()),
             transition_count=max(executed_phases - 1, 0),
             successful_actions=successful_actions,
-            total_actions=len(records),
+            total_actions=total_actions,
         )
 
     def scene_objects(self) -> Sequence[Mapping[str, object]]:
@@ -100,27 +113,19 @@ class BaselineExecutor:
         if step.skill == "GoToObject":
             if step.object_name is None:
                 raise ExecutionError("GoToObject requires object_name")
-            outcome = self._navigate_team(
+            outcomes = self._navigate_team(
                 robots=robots,
                 object_name=step.object_name,
             )
-            return ExecutionRecord(
-                request=step,
-                succeeded=outcome.succeeded,
-                error_message=outcome.error_message,
-            )
+            return self._execution_record(step=step, outcomes=outcomes)
 
         target_name = self._target_name_for_step(step)
-        outcome = self._perform_team_action(
+        outcomes = self._perform_team_action(
             robots=robots,
             action_name=skill.simulator_action or skill.name,
             target_name=target_name,
         )
-        return ExecutionRecord(
-            request=step,
-            succeeded=outcome.succeeded,
-            error_message=outcome.error_message,
-        )
+        return self._execution_record(step=step, outcomes=outcomes)
 
     def _get_robot(self, name: str) -> RobotSpec:
         try:
@@ -144,7 +149,7 @@ class BaselineExecutor:
             )
             for robot in robots
         ]
-        return self._combine_outcomes(outcomes)
+        return outcomes
 
     def _perform_action(
         self,
@@ -174,14 +179,16 @@ class BaselineExecutor:
             )
             for robot in robots
         ]
-        return self._combine_outcomes(outcomes)
+        return outcomes
 
-    def _combine_outcomes(self, outcomes):
+    def _execution_record(self, *, step: ActionRequest, outcomes):
         errors = [outcome.error_message for outcome in outcomes if outcome.error_message]
-        return type(outcomes[0])(
-            action=outcomes[0].action,
+        return ExecutionRecord(
+            request=step,
             succeeded=all(outcome.succeeded for outcome in outcomes),
             error_message="; ".join(dict.fromkeys(errors)),
+            successful_simulator_calls=sum(outcome.succeeded for outcome in outcomes),
+            total_simulator_calls=len(outcomes),
         )
 
     def _target_name_for_step(self, step: ActionRequest) -> str | None:

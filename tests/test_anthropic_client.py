@@ -5,14 +5,17 @@ import os
 import pytest
 
 from smart_llm_v2.agents.anthropic_client import (
+    AnthropicSemanticVerifierClient,
     AnthropicPlanningError,
     AnthropicToolUseJsonClient,
     TASK_PLAN_TOOL_NAME,
     _task_plan_tool,
 )
 from smart_llm_v2.agents.json_planner import JsonPlannerRequest, task_plan_json_schema
+from smart_llm_v2.agents.plan import ActionRequest, TaskPlan
 from smart_llm_v2.agents.model_profiles import resolve_model_profile
 from smart_llm_v2.agents.provider_factory import build_planning_client
+from smart_llm_v2.agents.verifier import PLAN_VERIFICATION_TOOL_NAME, SemanticVerificationRequest
 from smart_llm_v2.benchmark.models import BenchmarkTask
 from smart_llm_v2.robots import build_task_robot_team
 
@@ -67,6 +70,23 @@ def _request() -> JsonPlannerRequest:
         profile=resolve_model_profile(provider="anthropic", variant="symbolic"),
         response_schema=task_plan_json_schema(),
         system_message="Plan with JSON.",
+    )
+
+
+def _semantic_request() -> SemanticVerificationRequest:
+    return SemanticVerificationRequest(
+        task=BenchmarkTask(
+            floor_plan=1,
+            task_index=1,
+            instruction="Turn on the laptop",
+            robot_ids=(24,),
+        ),
+        robots=tuple(build_task_robot_team((24,))),
+        scene_objects=(),
+        plan=TaskPlan.sequential(
+            ActionRequest(robots=("robot1",), skill="SwitchOn", object_name="Laptop"),
+            planner_name="anthropic:claude-opus-4-7:symbolic",
+        ),
     )
 
 
@@ -199,6 +219,38 @@ def test_anthropic_client_rejects_repeated_task_plan_tool_use_blocks() -> None:
 
     with pytest.raises(AnthropicPlanningError, match="expected exactly one"):
         client.complete(_request())
+
+
+def test_anthropic_semantic_verifier_forces_single_verification_tool() -> None:
+    payload = {
+        "issues": [
+            {
+                "code": "semantic_gap",
+                "message": "The plan does not navigate before toggling the laptop.",
+                "phase_index": 0,
+                "action_index": 0,
+            }
+        ]
+    }
+    fake_client = FakeAnthropicClient(
+        FakeMessage(content=[FakeToolUseBlock(name=PLAN_VERIFICATION_TOOL_NAME, payload=payload)])
+    )
+    client = AnthropicSemanticVerifierClient(
+        model="claude-opus-4-7",
+        thinking_budget_tokens=1024,
+        client=fake_client,
+    )
+
+    result = client.review(_semantic_request())
+
+    assert result.provider == "anthropic"
+    assert result.model == "claude-opus-4-7"
+    assert result.issues[0].source == "semantic"
+    assert result.issues[0].code == "semantic_gap"
+    create_call = fake_client.messages.calls[0]
+    assert create_call["tool_choice"] == {"type": "auto"}
+    assert create_call["tools"][0]["name"] == PLAN_VERIFICATION_TOOL_NAME
+    assert "submit_plan_verification tool exactly once" in create_call["messages"][0]["content"][-1]["text"]
 
 
 @pytest.mark.integration

@@ -268,9 +268,10 @@ class JsonPlanner:
 
 
 DEFAULT_SYSTEM_MESSAGE = (
-    "Plan the task using structured JSON only. Respect robot skills, robot-team "
-    "assignments, object constraints, and temporal dependencies. Use the minimum "
-    "number of robots needed for the task."
+    "Plan the task using structured JSON only. Maximize successful task completion, "
+    "respect robot skills, robot-team assignments, object constraints, and temporal "
+    "dependencies, and use safe parallelism where it helps. Prefer fewer robots only "
+    "as a tie-break when plans are otherwise equally good."
 )
 
 

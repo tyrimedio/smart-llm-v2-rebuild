@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from smart_llm_v2.agents.json_planner import (
+    DEFAULT_SYSTEM_MESSAGE,
     JsonPlanner,
     JsonPlanningResult,
     JsonPlanValidationError,
@@ -31,6 +32,12 @@ class FakeJsonClient:
             model=request.profile.model,
             usage={"prompt_tokens": 12, "completion_tokens": 4, "total_tokens": 16},
         )
+
+
+def test_default_system_message_prioritizes_success_before_robot_count() -> None:
+    assert "minimum number of robots" not in DEFAULT_SYSTEM_MESSAGE
+    assert "Maximize successful task completion" in DEFAULT_SYSTEM_MESSAGE
+    assert "Prefer fewer robots only as a tie-break" in DEFAULT_SYSTEM_MESSAGE
 
 
 def test_json_task_plan_converts_to_task_plan() -> None:

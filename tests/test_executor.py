@@ -8,13 +8,23 @@ from smart_llm_v2.robots import build_task_robot_team
 
 
 class FakeEnvironment:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        navigation_results: dict[tuple[int, str], ActionOutcome] | None = None,
+        action_results: dict[tuple[int, str, str | None], ActionOutcome] | None = None,
+    ) -> None:
         self.calls: list[tuple[str, int, str | None, str | None]] = []
         self.objects = ({"name": "Laptop|0", "isToggled": True},)
+        self.navigation_results = navigation_results or {}
+        self.action_results = action_results or {}
 
     def navigate_to_object(self, *, agent_id: int, object_name: str) -> ActionOutcome:
         self.calls.append(("navigate", agent_id, object_name, None))
-        return ActionOutcome(action="GoToObject", succeeded=True)
+        return self.navigation_results.get(
+            (agent_id, object_name),
+            ActionOutcome(action="GoToObject", succeeded=True),
+        )
 
     def perform_action(
         self,
@@ -24,7 +34,10 @@ class FakeEnvironment:
         target_name: str | None = None,
     ) -> ActionOutcome:
         self.calls.append(("perform", agent_id, action_name, target_name))
-        return ActionOutcome(action=action_name, succeeded=True)
+        return self.action_results.get(
+            (agent_id, action_name, target_name),
+            ActionOutcome(action=action_name, succeeded=True),
+        )
 
     def scene_objects(self):
         return self.objects
@@ -180,3 +193,45 @@ def test_executor_executes_team_throw_for_each_robot() -> None:
         ("perform", 0, "ThrowObject", "Fork"),
         ("perform", 1, "ThrowObject", "Fork"),
     ]
+
+
+def test_executor_counts_team_action_executability_per_planned_action() -> None:
+    environment = FakeEnvironment(
+        action_results={
+            (0, "PickupObject", "Mug"): ActionOutcome(action="PickupObject", succeeded=True),
+            (
+                1,
+                "PickupObject",
+                "Mug",
+            ): ActionOutcome(
+                action="PickupObject",
+                succeeded=False,
+                error_message="Robot 2 cannot reach Mug",
+            ),
+        }
+    )
+    executor = BaselineExecutor(
+        environment=environment,
+        robots=build_task_robot_team((1, 2)),
+    )
+    plan = TaskPlan(
+        phases=(
+            PlanPhase(
+                actions=(
+                    ActionRequest(
+                        robots=("robot1", "robot2"),
+                        skill="PickupObject",
+                        object_name="Mug",
+                    ),
+                )
+            ),
+        )
+    )
+
+    report = executor.run_plan(plan)
+
+    assert report.records[0].succeeded is False
+    assert report.records[0].successful_simulator_calls == 1
+    assert report.records[0].total_simulator_calls == 2
+    assert report.successful_actions == 0
+    assert report.total_actions == 1

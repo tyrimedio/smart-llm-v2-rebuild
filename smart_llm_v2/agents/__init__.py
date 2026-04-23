@@ -1,4 +1,5 @@
 from smart_llm_v2.agents.anthropic_client import (
+    AnthropicSemanticVerifierClient,
     AnthropicPlanningError,
     AnthropicToolUseJsonClient,
     TASK_PLAN_TOOL_NAME,
@@ -36,6 +37,7 @@ from smart_llm_v2.agents.model_profiles import (
     resolve_model_profile,
 )
 from smart_llm_v2.agents.openai_client import (
+    OpenAICompatibleSemanticVerifierClient,
     OpenAICompatiblePlanningError,
     OpenAICompatibleToolUseJsonClient,
 )
@@ -46,16 +48,37 @@ from smart_llm_v2.agents.paper_planner import (
 )
 from smart_llm_v2.agents.plan import ActionRequest, PlanPhase, TaskPlan
 from smart_llm_v2.agents.planner import PlanBuildResult, Planner, PlanningImage
-from smart_llm_v2.agents.provider_factory import build_json_planner, build_planning_client
+from smart_llm_v2.agents.provider_factory import (
+    build_json_planner,
+    build_plan_verifier,
+    build_planning_client,
+    build_semantic_verifier_client,
+)
+from smart_llm_v2.agents.verifier import (
+    DEFAULT_SEMANTIC_VERIFIER_SYSTEM_MESSAGE,
+    PLAN_VERIFICATION_TOOL_NAME,
+    PlanVerificationResult,
+    PlanVerifier,
+    SemanticVerificationPayloadError,
+    SemanticVerificationRequest,
+    SemanticVerificationResult,
+    SemanticVerifierClient,
+    VerificationIssue,
+    build_semantic_verification_context,
+    semantic_verification_json_schema,
+    semantic_verification_result_from_mapping,
+)
 
 __all__ = [
     "ActionRequest",
     "AstPaperPlanParser",
     "AnthropicPlanningError",
+    "AnthropicSemanticVerifierClient",
     "AnthropicToolUseJsonClient",
     "BASE_URL_ENV_VAR",
     "BaselineExecutor",
     "DEFAULT_KIMI_BASE_URL",
+    "DEFAULT_SEMANTIC_VERIFIER_SYSTEM_MESSAGE",
     "DEFAULT_SYSTEM_MESSAGE",
     "ExecutionError",
     "ExecutionReport",
@@ -71,11 +94,15 @@ __all__ = [
     "MODEL_ENV_VAR",
     "ModelProfile",
     "OpenAICompatiblePlanningError",
+    "OpenAICompatibleSemanticVerifierClient",
     "OpenAICompatibleToolUseJsonClient",
     "PaperPromptAssets",
     "PaperStagedPlanner",
+    "PLAN_VERIFICATION_TOOL_NAME",
     "PlanBuildResult",
     "PlanPhase",
+    "PlanVerificationResult",
+    "PlanVerifier",
     "Planner",
     "PlanningImage",
     "PROFILE_VARIANT_ENV_VAR",
@@ -85,10 +112,20 @@ __all__ = [
     "TASK_PLAN_TOOL_NAME",
     "TaskPlan",
     "Transport",
+    "SemanticVerificationRequest",
+    "SemanticVerificationResult",
+    "SemanticVerificationPayloadError",
+    "SemanticVerifierClient",
+    "VerificationIssue",
     "build_planning_context",
     "build_json_planner",
+    "build_plan_verifier",
     "build_planning_client",
+    "build_semantic_verification_context",
+    "build_semantic_verifier_client",
     "infer_provider_from_model",
     "resolve_model_profile",
+    "semantic_verification_json_schema",
+    "semantic_verification_result_from_mapping",
     "task_plan_json_schema",
 ]

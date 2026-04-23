@@ -8,10 +8,13 @@ import pytest
 from smart_llm_v2.agents.json_planner import JsonPlannerRequest, task_plan_json_schema
 from smart_llm_v2.agents.model_profiles import resolve_model_profile
 from smart_llm_v2.agents.openai_client import (
+    OpenAICompatibleSemanticVerifierClient,
     OpenAICompatiblePlanningError,
     OpenAICompatibleToolUseJsonClient,
 )
+from smart_llm_v2.agents.plan import ActionRequest, TaskPlan
 from smart_llm_v2.agents.planner import PlanningImage
+from smart_llm_v2.agents.verifier import PLAN_VERIFICATION_TOOL_NAME, SemanticVerificationRequest
 from smart_llm_v2.benchmark.models import BenchmarkTask
 from smart_llm_v2.robots import build_task_robot_team
 
@@ -48,7 +51,29 @@ def _request(*, provider: str, variant: str = "symbolic") -> JsonPlannerRequest:
     )
 
 
-def _response(*, payload: dict[str, object]) -> object:
+def _semantic_request(*, provider: str, variant: str = "symbolic") -> SemanticVerificationRequest:
+    return SemanticVerificationRequest(
+        task=BenchmarkTask(
+            floor_plan=1,
+            task_index=1,
+            instruction="Turn on the laptop",
+            robot_ids=(24,),
+        ),
+        robots=tuple(build_task_robot_team((24,))),
+        scene_objects=(),
+        plan=TaskPlan.sequential(
+            ActionRequest(robots=("robot1",), skill="SwitchOn", object_name="Laptop"),
+            planner_name=f"{provider}:model:{variant}",
+        ),
+        images=(
+            (PlanningImage(data=b"png-bytes", agent_id=0, label="robot1_view"),)
+            if variant == "multimodal"
+            else ()
+        ),
+    )
+
+
+def _response(*, payload: dict[str, object], tool_name: str = "submit_task_plan") -> object:
     return SimpleNamespace(
         choices=[
             SimpleNamespace(
@@ -56,7 +81,7 @@ def _response(*, payload: dict[str, object]) -> object:
                     tool_calls=[
                         SimpleNamespace(
                             function=SimpleNamespace(
-                                name="submit_task_plan",
+                                name=tool_name,
                                 arguments=(
                                     '{"phases":[{"actions":[{"robots":["robot1"],"skill":"GoToObject","object_name":"Laptop"}]}]}'
                                     if not payload
@@ -194,3 +219,50 @@ def test_openai_client_rejects_malformed_tool_json() -> None:
 
     with pytest.raises(OpenAICompatiblePlanningError, match="not valid JSON"):
         client.complete(_request(provider="openai"))
+
+
+def test_openai_semantic_verifier_forces_verification_tool_and_normalizes_usage() -> None:
+    fake_client = FakeOpenAIClient(
+        _response(
+            payload={
+                "issues": [
+                    {
+                        "code": "semantic_gap",
+                        "message": "The plan should navigate before toggling the laptop.",
+                        "phase_index": 0,
+                        "action_index": 0,
+                    }
+                ]
+            },
+            tool_name=PLAN_VERIFICATION_TOOL_NAME,
+        )
+    )
+    client = OpenAICompatibleSemanticVerifierClient(
+        provider="openai",
+        model="gpt-5.4",
+        api_key_env_var="OPENAI_API_KEY",
+        client=fake_client,
+        reasoning_effort="high",
+        vision_enabled=True,
+        image_detail="low",
+    )
+
+    result = client.review(_semantic_request(provider="openai", variant="multimodal"))
+
+    assert result.provider == "openai"
+    assert result.model == "gpt-5.4"
+    assert result.issues[0].source == "semantic"
+    assert result.usage == {
+        "prompt_tokens": 18,
+        "completion_tokens": 5,
+        "total_tokens": 23,
+        "cached_tokens": 4,
+        "reasoning_tokens": 2,
+    }
+    create_call = fake_client.chat.completions.calls[0]
+    assert create_call["tool_choice"] == {
+        "type": "function",
+        "function": {"name": PLAN_VERIFICATION_TOOL_NAME},
+    }
+    assert "submit_plan_verification tool exactly once" in create_call["messages"][1]["content"][0]["text"]
+    assert create_call["messages"][1]["content"][2]["image_url"]["detail"] == "low"
