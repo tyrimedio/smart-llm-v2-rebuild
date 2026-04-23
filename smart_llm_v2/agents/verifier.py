@@ -35,6 +35,12 @@ _MUTATING_OBJECT_SKILLS = frozenset(
         "PullObject",
     }
 )
+_BENCHMARK_UNSCORED_SEMANTIC_CODES = frozenset(
+    {
+        "AMBIGUOUS_OBJECT_REFERENCE",
+        "MISSING_STOP_ACTION",
+    }
+)
 
 PLAN_VERIFICATION_TOOL_NAME = "submit_plan_verification"
 DEFAULT_SEMANTIC_VERIFIER_SYSTEM_MESSAGE = (
@@ -160,7 +166,11 @@ class PlanVerifier:
             )
         )
         return PlanVerificationResult(
-            issues=semantic_result.issues,
+            issues=tuple(
+                issue
+                for issue in semantic_result.issues
+                if _semantic_issue_in_benchmark_scope(task=task, plan=plan, issue=issue)
+            ),
             semantic_checked=True,
             provider=semantic_result.provider,
             model=semantic_result.model,
@@ -649,6 +659,8 @@ def _receptacle_state_issues(
     if not matching_keys:
         if open_state_by_object.get(_fallback_object_key(action.receptacle_name), True):
             return []
+    elif not _matching_receptacles_require_open_state(matching_keys, scene_objects):
+        return []
     elif any(key not in open_state_by_object for key in matching_keys):
         return []
     elif any(open_state_by_object[key] for key in matching_keys):
@@ -729,6 +741,63 @@ def _scene_open_state_index(
             continue
         states[_scene_object_key(index)] = is_open
     return states
+
+
+def _matching_receptacles_require_open_state(
+    matching_keys: Sequence[str],
+    scene_objects: Sequence[Mapping[str, object]],
+) -> bool:
+    matched_objects = tuple(
+        scene_objects[int(key.removeprefix("scene:"))]
+        for key in matching_keys
+        if key.startswith("scene:") and key.removeprefix("scene:").isdigit()
+    )
+    if not matched_objects:
+        return True
+    return any(scene_object.get("openable") is not False for scene_object in matched_objects)
+
+
+def _semantic_issue_in_benchmark_scope(
+    *,
+    task: BenchmarkTask,
+    plan: TaskPlan,
+    issue: VerificationIssue,
+) -> bool:
+    if issue.source != "semantic":
+        return True
+    if issue.code not in _BENCHMARK_UNSCORED_SEMANTIC_CODES:
+        return True
+
+    target_names = _semantic_issue_action_targets(plan=plan, issue=issue)
+    if not target_names:
+        return True
+    return any(_target_is_scored(target_name, task) for target_name in target_names)
+
+
+def _semantic_issue_action_targets(*, plan: TaskPlan, issue: VerificationIssue) -> tuple[str, ...]:
+    if issue.phase_index is None or issue.action_index is None:
+        return ()
+    if issue.phase_index < 0 or issue.phase_index >= len(plan.phases):
+        return ()
+    actions = plan.phases[issue.phase_index].actions
+    if issue.action_index < 0 or issue.action_index >= len(actions):
+        return ()
+    action = actions[issue.action_index]
+    return tuple(
+        target_name
+        for target_name in (action.object_name, action.receptacle_name)
+        if target_name is not None
+    )
+
+
+def _target_is_scored(target_name: str, task: BenchmarkTask) -> bool:
+    target = _canonical_text(target_name)
+    for goal_state in task.goal_states:
+        if target == _canonical_text(goal_state.name):
+            return True
+        if any(target == _canonical_text(contained) for contained in goal_state.contains):
+            return True
+    return False
 
 
 def _scene_mass_index(

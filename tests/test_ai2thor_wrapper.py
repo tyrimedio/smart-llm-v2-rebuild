@@ -14,6 +14,13 @@ class RecordingController:
                 "objects": [
                     {"objectId": "Mug|A", "distance": 1.0},
                     {"objectId": "Mug|B", "distance": 2.0},
+                    {
+                        "objectId": "Sink|+00.75|+00.88|-00.68|SinkBasin",
+                        "distance": 0.5,
+                        "axisAlignedBoundingBox": {
+                            "center": {"x": 0.75, "y": 0.82, "z": -0.68}
+                        },
+                    },
                 ]
             },
             events=[
@@ -22,6 +29,10 @@ class RecordingController:
                         "objects": [
                             {"objectId": "Mug|A", "distance": 1.0},
                             {"objectId": "Mug|B", "distance": 2.0},
+                            {
+                                "objectId": "Sink|+00.75|+00.88|-00.68|SinkBasin",
+                                "distance": 0.5,
+                            },
                         ]
                     }
                 ),
@@ -30,6 +41,10 @@ class RecordingController:
                         "objects": [
                             {"objectId": "Mug|A", "distance": 3.0},
                             {"objectId": "Mug|B", "distance": 0.5},
+                            {
+                                "objectId": "Sink|+00.75|+00.88|-00.68|SinkBasin",
+                                "distance": 1.0,
+                            },
                         ]
                     }
                 ),
@@ -86,3 +101,62 @@ def test_step_delay_slows_simulator_steps(monkeypatch) -> None:
     )
 
     assert sleeps == [0.25]
+
+
+def test_nested_ai2thor_object_ids_match_by_component() -> None:
+    environment = Ai2ThorEnvironment()
+    environment._controller = RecordingController()
+
+    object_id, center = environment._resolve_object_with_center("SinkBasin")
+
+    assert object_id == "Sink|+00.75|+00.88|-00.68|SinkBasin"
+    assert center == {"x": 0.75, "y": 0.82, "z": -0.68}
+
+
+def test_perform_action_matches_nested_ai2thor_object_id_components() -> None:
+    environment = Ai2ThorEnvironment()
+    controller = RecordingController()
+    environment._controller = controller
+
+    environment.perform_action(
+        agent_id=0,
+        action_name="PutObject",
+        target_name="SinkBasin",
+    )
+
+    assert controller.calls[-1] == {
+        "action": "PutObject",
+        "agentId": 0,
+        "forceAction": True,
+        "objectId": "Sink|+00.75|+00.88|-00.68|SinkBasin",
+    }
+
+
+def test_perform_action_treats_exact_object_ids_as_literals() -> None:
+    environment = Ai2ThorEnvironment()
+    controller = RecordingController()
+    environment._controller = controller
+
+    environment.perform_action(
+        agent_id=0,
+        action_name="PickupObject",
+        target_name="Mug|B",
+    )
+
+    assert controller.calls[-1] == {
+        "action": "PickupObject",
+        "agentId": 0,
+        "forceAction": True,
+        "objectId": "Mug|B",
+    }
+
+
+def test_full_nested_ai2thor_object_id_matches_without_regex_parsing() -> None:
+    environment = Ai2ThorEnvironment()
+    environment._controller = RecordingController()
+    nested_id = "Sink|+00.75|+00.88|-00.68|SinkBasin"
+
+    object_id, center = environment._resolve_object_with_center(nested_id)
+
+    assert object_id == nested_id
+    assert center == {"x": 0.75, "y": 0.82, "z": -0.68}
