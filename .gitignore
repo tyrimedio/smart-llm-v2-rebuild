@@ -18,3 +18,9 @@ AGENTS.md
 CLAUDE.md
 smart-llm.pdf
 agents-review/
+results/*
+!results/.gitkeep
+output/
+outputs/
+logs/
+*.log
